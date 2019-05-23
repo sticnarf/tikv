@@ -12,6 +12,7 @@ use tipb::expression::{Expr, FieldType};
 use crate::coprocessor::codec::batch::{LazyBatchColumn, LazyBatchColumnVec};
 use crate::coprocessor::dag::aggr_fn::*;
 use crate::coprocessor::dag::batch::executors::util::aggr_executor::*;
+use crate::coprocessor::dag::batch::executors::util::arena::BytesArena;
 use crate::coprocessor::dag::batch::executors::util::hash_aggr_helper::HashAggregationHelper;
 use crate::coprocessor::dag::batch::interface::*;
 use crate::coprocessor::dag::exec_summary::ExecSummaryCollectorDisabled;
@@ -88,6 +89,27 @@ impl BatchSlowHashAggregationExecutor<ExecSummaryCollectorDisabled, Box<dyn Batc
     }
 }
 
+pub struct SlowHashAggregationImpl {
+    states: Vec<Box<dyn AggrFunctionState>>,
+    group_data: GroupData,
+    group_by_exps: Vec<RpnExpression>,
+    states_offset_each_row: Vec<usize>,
+}
+
+rental! {
+    pub mod rental_impl {
+        use super::*;
+
+        #[rental]
+        pub struct GroupData {
+            arena: Box<BytesArena>,
+            groups: HashMap<&'arena [u8], GroupInfo>,
+        }
+    }
+}
+
+use self::rental_impl::*;
+
 impl<C: ExecSummaryCollector, Src: BatchExecutor> BatchSlowHashAggregationExecutor<C, Src> {
     pub fn new(
         summary_collector: C,
@@ -123,9 +145,12 @@ impl<C: ExecSummaryCollector, Src: BatchExecutor> BatchSlowHashAggregationExecut
         aggr_defs: Vec<Expr>,
         aggr_def_parser: impl AggrDefinitionParser,
     ) -> Result<Self> {
+        let group_data = GroupData::new(Box::new(BytesArena::with_capacity(1 << 16)), |_| {
+            HashMap::default()
+        });
         let aggr_impl = SlowHashAggregationImpl {
             states: Vec::with_capacity(1024),
-            groups: HashMap::default(),
+            group_data,
             group_by_exps,
             states_offset_each_row: Vec::with_capacity(
                 crate::coprocessor::dag::batch_handler::BATCH_MAX_SIZE,
@@ -143,15 +168,8 @@ impl<C: ExecSummaryCollector, Src: BatchExecutor> BatchSlowHashAggregationExecut
     }
 }
 
-pub struct SlowHashAggregationImpl {
-    states: Vec<Box<dyn AggrFunctionState>>,
-    groups: HashMap<Vec<u8>, GroupInfo>,
-    group_by_exps: Vec<RpnExpression>,
-    states_offset_each_row: Vec<usize>,
-}
-
 #[derive(Debug)]
-struct GroupInfo {
+pub struct GroupInfo {
     /// The start offset of the states of this group stored in
     /// `SlowHashAggregationImpl::states`.
     states_start_offset: usize,
@@ -196,70 +214,87 @@ impl<Src: BatchExecutor> AggregationExecutorImpl<Src> for SlowHashAggregationImp
         entities: &mut Entities<Src>,
         mut input: LazyBatchColumnVec,
     ) -> Result<()> {
-        let rows_len = input.rows_len();
+        let states = &mut self.states;
+        let states_offset_each_row = &mut self.states_offset_each_row;
+        let group_by_exps = &mut self.group_by_exps;
 
-        // 1. Calculate which group each src row belongs to.
-        self.states_offset_each_row.clear();
+        self.group_data
+            .rent_all_mut(|GroupData_BorrowMut { arena, groups }| {
+                let rows_len = input.rows_len();
 
-        let src_schema = entities.src.schema();
+                // 1. Calculate which group each src row belongs to.
+                states_offset_each_row.clear();
 
-        // TODO: Eliminate these allocations using an allocator.
-        let mut group_by_keys = Vec::with_capacity(rows_len);
-        let mut group_by_keys_offsets = Vec::with_capacity(rows_len);
-        for _ in 0..rows_len {
-            group_by_keys.push(Vec::with_capacity(32));
-            group_by_keys_offsets.push(SmallVec::new());
-        }
-        for group_by_exp in &self.group_by_exps {
-            let group_by_result =
-                group_by_exp.eval(&mut entities.context, rows_len, src_schema, &mut input)?;
-            // Unwrap is fine because we have verified the group by expression before.
-            let group_column = group_by_result.vector_value().unwrap();
-            let field_type = group_by_result.field_type();
-            for row_index in 0..rows_len {
-                group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
-                group_column.encode(row_index, field_type, &mut group_by_keys[row_index])?;
-            }
-        }
-        // One extra offset, to be used as the end offset.
-        for row_index in 0..rows_len {
-            group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
-        }
+                let src_schema = entities.src.schema();
 
-        for (group_key, group_key_offsets) in group_by_keys.into_iter().zip(group_by_keys_offsets) {
-            match self.groups.entry(group_key) {
-                Entry::Vacant(entry) => {
-                    let offset = self.states.len();
-                    self.states_offset_each_row.push(offset);
-                    entry.insert(GroupInfo {
-                        states_start_offset: offset,
-                        group_key_offsets,
-                    });
-                    for aggr_fn in &entities.each_aggr_fn {
-                        self.states.push(aggr_fn.create_state());
+                let mut group_by_keys = Vec::with_capacity(rows_len);
+                let mut group_by_keys_offsets = Vec::with_capacity(rows_len);
+                for _ in 0..rows_len {
+                    group_by_keys.push(arena.new_vec());
+                    group_by_keys_offsets.push(SmallVec::new());
+                }
+                for group_by_exp in group_by_exps {
+                    let group_by_result = group_by_exp.eval(
+                        &mut entities.context,
+                        rows_len,
+                        src_schema,
+                        &mut input,
+                    )?;
+                    // Unwrap is fine because we have verified the group by expression before.
+                    let group_column = group_by_result.vector_value().unwrap();
+                    let field_type = group_by_result.field_type();
+                    for row_index in 0..rows_len {
+                        group_by_keys_offsets[row_index]
+                            .push(group_by_keys[row_index].len() as u32);
+                        group_column.encode(
+                            row_index,
+                            field_type,
+                            &mut group_by_keys[row_index],
+                        )?;
                     }
                 }
-                Entry::Occupied(entry) => {
-                    self.states_offset_each_row
-                        .push(entry.get().states_start_offset);
+                // One extra offset, to be used as the end offset.
+                for row_index in 0..rows_len {
+                    group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
                 }
-            }
-        }
 
-        // 2. Update states according to the group.
-        HashAggregationHelper::update_each_row_states_by_offset(
-            entities,
-            &mut input,
-            &mut self.states,
-            &self.states_offset_each_row,
-        )?;
+                for (group_key, group_key_offsets) in
+                    group_by_keys.into_iter().zip(group_by_keys_offsets)
+                {
+                    match groups.entry(group_key.into_inner()) {
+                        Entry::Vacant(entry) => {
+                            let offset = states.len();
+                            states_offset_each_row.push(offset);
+                            entry.insert(GroupInfo {
+                                states_start_offset: offset,
+                                group_key_offsets,
+                            });
+                            for aggr_fn in &entities.each_aggr_fn {
+                                states.push(aggr_fn.create_state());
+                            }
+                        }
+                        Entry::Occupied(entry) => {
+                            states_offset_each_row.push(entry.get().states_start_offset);
+                            unsafe { arena.add_free(entry.replace_key()); }
+                        }
+                    }
+                }
 
-        Ok(())
+                // 2. Update states according to the group.
+                HashAggregationHelper::update_each_row_states_by_offset(
+                    entities,
+                    &mut input,
+                    states,
+                    states_offset_each_row,
+                )?;
+
+                Ok(())
+            })
     }
 
     #[inline]
     fn groups_len(&self) -> usize {
-        self.groups.len()
+        self.group_data.rent(|groups| groups.len())
     }
 
     #[inline]
@@ -268,32 +303,36 @@ impl<Src: BatchExecutor> AggregationExecutorImpl<Src> for SlowHashAggregationImp
         entities: &mut Entities<Src>,
         mut iteratee: impl FnMut(&mut Entities<Src>, &[Box<dyn AggrFunctionState>]) -> Result<()>,
     ) -> Result<Vec<LazyBatchColumn>> {
-        let number_of_groups = self.groups.len();
-        let group_by_exps_len = self.group_by_exps.len();
-        let mut group_by_columns: Vec<_> = self
-            .group_by_exps
-            .iter()
-            .map(|_| LazyBatchColumn::raw_with_capacity(number_of_groups))
-            .collect();
-        let aggr_fns_len = entities.each_aggr_fn.len();
+        let states = &mut self.states;
+        let group_by_exps = &mut self.group_by_exps;
 
-        let groups = std::mem::replace(&mut self.groups, HashMap::default());
-        for (group_key, group_info) in groups {
-            iteratee(
-                entities,
-                &self.states
-                    [group_info.states_start_offset..group_info.states_start_offset + aggr_fns_len],
-            )?;
+        self.group_data.rent_mut(|groups| {
+            let number_of_groups = groups.len();
+            let group_by_exps_len = group_by_exps.len();
+            let mut group_by_columns: Vec<_> = group_by_exps
+                .iter()
+                .map(|_| LazyBatchColumn::raw_with_capacity(number_of_groups))
+                .collect();
+            let aggr_fns_len = entities.each_aggr_fn.len();
 
-            // Extract group column from group key for each group
-            for group_index in 0..group_by_exps_len {
-                let offset_begin = group_info.group_key_offsets[group_index] as usize;
-                let offset_end = group_info.group_key_offsets[group_index + 1] as usize;
-                group_by_columns[group_index].push_raw(&group_key[offset_begin..offset_end]);
+            let groups = std::mem::replace(groups, HashMap::default());
+            for (group_key, group_info) in groups {
+                iteratee(
+                    entities,
+                    &states[group_info.states_start_offset
+                        ..group_info.states_start_offset + aggr_fns_len],
+                )?;
+
+                // Extract group column from group key for each group
+                for group_index in 0..group_by_exps_len {
+                    let offset_begin = group_info.group_key_offsets[group_index] as usize;
+                    let offset_end = group_info.group_key_offsets[group_index + 1] as usize;
+                    group_by_columns[group_index].push_raw(&group_key[offset_begin..offset_end]);
+                }
             }
-        }
 
-        Ok(group_by_columns)
+            Ok(group_by_columns)
+        })
     }
 }
 

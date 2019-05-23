@@ -121,6 +121,8 @@ tokio-threadpool = "0.1.13"
 vlog = "0.1.4"
 twoway = "0.2.0"
 ordered-float = "1.0"
+typed-arena = "1.4.1"
+rental = "0.5.3"
 profiler = { path = "components/profiler" }
 match_template = { path = "components/match_template" }
 cop_datatype = { path = "components/cop_datatype" }

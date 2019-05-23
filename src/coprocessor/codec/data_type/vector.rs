@@ -9,6 +9,7 @@ use super::*;
 use crate::coprocessor::codec::datum;
 use crate::coprocessor::codec::mysql::Tz;
 use crate::coprocessor::codec::{Error, Result};
+use std::io::Write;
 use tikv_util::codec::{bytes, number};
 
 /// A vector value container, a.k.a. column, for all concrete eval types.
@@ -457,11 +458,11 @@ impl VectorValue {
 
     /// Encodes a single element into binary format.
     // FIXME: Use BufferWriter.
-    pub fn encode(
+    pub fn encode<W: Write>(
         &self,
         row_index: usize,
         field_type: &FieldType,
-        output: &mut Vec<u8>,
+        output: &mut W,
     ) -> Result<()> {
         use crate::coprocessor::codec::mysql::DecimalEncoder;
         use crate::coprocessor::codec::mysql::JsonEncoder;
@@ -472,15 +473,15 @@ impl VectorValue {
             VectorValue::Int(ref vec) => {
                 match vec[row_index] {
                     None => {
-                        output.push(datum::NIL_FLAG);
+                        output.write_all(&[datum::NIL_FLAG])?;
                     }
                     Some(val) => {
                         // Always encode to INT / UINT instead of VAR INT to be efficient.
                         if field_type.flag().contains(FieldTypeFlag::UNSIGNED) {
-                            output.push(datum::UINT_FLAG);
+                            output.write_all(&[datum::UINT_FLAG])?;
                             output.encode_u64(val as u64)?;
                         } else {
-                            output.push(datum::INT_FLAG);
+                            output.write_all(&[datum::INT_FLAG])?;
                             output.encode_i64(val)?;
                         }
                     }
@@ -490,10 +491,10 @@ impl VectorValue {
             VectorValue::Real(ref vec) => {
                 match vec[row_index] {
                     None => {
-                        output.push(datum::NIL_FLAG);
+                        output.write_all(&[datum::NIL_FLAG])?;
                     }
                     Some(val) => {
-                        output.push(datum::FLOAT_FLAG);
+                        output.write_all(&[datum::FLOAT_FLAG])?;
                         output.encode_f64(val.into_inner())?;
                     }
                 }
@@ -502,10 +503,10 @@ impl VectorValue {
             VectorValue::Decimal(ref vec) => {
                 match &vec[row_index] {
                     None => {
-                        output.push(datum::NIL_FLAG);
+                        output.write_all(&[datum::NIL_FLAG])?;
                     }
                     Some(val) => {
-                        output.push(datum::DECIMAL_FLAG);
+                        output.write_all(&[datum::DECIMAL_FLAG])?;
                         let (prec, frac) = val.prec_and_frac();
                         output.encode_decimal(val, prec, frac)?;
                     }
@@ -515,10 +516,10 @@ impl VectorValue {
             VectorValue::Bytes(ref vec) => {
                 match &vec[row_index] {
                     None => {
-                        output.push(datum::NIL_FLAG);
+                        output.write_all(&[datum::NIL_FLAG])?;
                     }
                     Some(ref val) => {
-                        output.push(datum::COMPACT_BYTES_FLAG);
+                        output.write_all(&[datum::COMPACT_BYTES_FLAG])?;
                         output.encode_compact_bytes(val)?;
                     }
                 }
@@ -527,10 +528,10 @@ impl VectorValue {
             VectorValue::DateTime(ref vec) => {
                 match &vec[row_index] {
                     None => {
-                        output.push(datum::NIL_FLAG);
+                        output.write_all(&[datum::NIL_FLAG])?;
                     }
                     Some(ref val) => {
-                        output.push(datum::UINT_FLAG);
+                        output.write_all(&[datum::UINT_FLAG])?;
                         output.encode_u64(val.to_packed_u64())?;
                     }
                 }
@@ -539,10 +540,10 @@ impl VectorValue {
             VectorValue::Duration(ref vec) => {
                 match &vec[row_index] {
                     None => {
-                        output.push(datum::NIL_FLAG);
+                        output.write_all(&[datum::NIL_FLAG])?;
                     }
                     Some(ref val) => {
-                        output.push(datum::DURATION_FLAG);
+                        output.write_all(&[datum::DURATION_FLAG])?;
                         output.encode_i64(val.to_nanos())?;
                     }
                 }
@@ -551,10 +552,10 @@ impl VectorValue {
             VectorValue::Json(ref vec) => {
                 match &vec[row_index] {
                     None => {
-                        output.push(datum::NIL_FLAG);
+                        output.write_all(&[datum::NIL_FLAG])?;
                     }
                     Some(ref val) => {
-                        output.push(datum::JSON_FLAG);
+                        output.write_all(&[datum::JSON_FLAG])?;
                         output.encode_json(val)?;
                     }
                 }
