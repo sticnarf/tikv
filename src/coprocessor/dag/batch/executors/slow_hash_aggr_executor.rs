@@ -195,30 +195,34 @@ impl<Src: BatchExecutor> AggregationExecutorImpl<Src> for SlowHashAggregationImp
 
         let src_schema = entities.src.schema();
 
-        // TODO: Eliminate these allocations using an allocator.
-        let mut group_by_keys = Vec::with_capacity(rows_len);
-        let mut group_by_keys_offsets = Vec::with_capacity(rows_len);
-        for _ in 0..rows_len {
-            group_by_keys.push(Vec::with_capacity(32));
-            group_by_keys_offsets.push(SmallVec::new());
-        }
         for group_by_exp in &self.group_by_exps {
-            let group_by_result =
-                group_by_exp.eval(&mut entities.context, rows_len, src_schema, &mut input)?;
-            // Unwrap is fine because we have verified the group by expression before.
-            let group_column = group_by_result.vector_value().unwrap();
-            let field_type = group_by_result.field_type();
-            for row_index in 0..rows_len {
-                group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
-                group_column.encode(row_index, field_type, &mut group_by_keys[row_index])?;
-            }
+            group_by_exp.ensure_columns_decoded(&mut entities.context, src_schema, &mut input)?;
         }
-        // One extra offset, to be used as the end offset.
-        for row_index in 0..rows_len {
-            group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
+        let mut group_by_results = Vec::with_capacity(self.group_by_exps.len());
+        for group_by_exp in &self.group_by_exps {
+            group_by_results.push(group_by_exp.eval_unchecked(
+                &mut entities.context,
+                rows_len,
+                src_schema,
+                &input,
+            )?);
         }
 
-        for (group_key, group_key_offsets) in group_by_keys.into_iter().zip(group_by_keys_offsets) {
+        for row_index in 0..rows_len {
+            let mut group_key = Vec::with_capacity(32);
+            let mut group_key_offsets = SmallVec::new();
+
+            for group_by_result in &group_by_results {
+                // Unwrap is fine because we have verified the group by expression before.
+                let group_column = group_by_result.vector_value().unwrap();
+                let field_type = group_by_result.field_type();
+
+                group_key_offsets.push(group_key.len() as u32);
+                group_column.encode(row_index, field_type, &mut group_key)?;
+            }
+            // One extra offset, to be used as the end offset.
+            group_key_offsets.push(group_key.len() as u32);
+
             match self.groups.entry(group_key) {
                 Entry::Vacant(entry) => {
                     let offset = self.states.len();
