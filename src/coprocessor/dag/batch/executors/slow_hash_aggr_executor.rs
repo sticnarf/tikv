@@ -10,11 +10,14 @@ use tipb::executor::Aggregation;
 use tipb::expression::{Expr, FieldType};
 
 use crate::coprocessor::codec::batch::{LazyBatchColumn, LazyBatchColumnVec};
+use crate::coprocessor::codec::mysql::time::Tz;
 use crate::coprocessor::dag::aggr_fn::*;
 use crate::coprocessor::dag::batch::executors::util::aggr_executor::*;
 use crate::coprocessor::dag::batch::executors::util::hash_aggr_helper::HashAggregationHelper;
 use crate::coprocessor::dag::batch::interface::*;
 use crate::coprocessor::dag::expr::EvalConfig;
+use crate::coprocessor::dag::expr::EvalContext;
+use crate::coprocessor::dag::rpn_expr::types::RpnStackNode;
 use crate::coprocessor::dag::rpn_expr::{RpnExpression, RpnExpressionBuilder};
 use crate::coprocessor::Result;
 
@@ -188,6 +191,7 @@ impl<Src: BatchExecutor> AggregationExecutorImpl<Src> for SlowHashAggregationImp
         entities: &mut Entities<Src>,
         mut input: LazyBatchColumnVec,
     ) -> Result<()> {
+        let context = &mut entities.context;
         let rows_len = input.rows_len();
 
         // 1. Calculate which group each src row belongs to.
@@ -202,19 +206,31 @@ impl<Src: BatchExecutor> AggregationExecutorImpl<Src> for SlowHashAggregationImp
             group_by_keys.push(Vec::with_capacity(32));
             group_by_keys_offsets.push(SmallVec::new());
         }
-        for group_by_exp in &self.group_by_exps {
-            let group_by_result =
-                group_by_exp.eval(&mut entities.context, rows_len, src_schema, &mut input)?;
-            // Unwrap is fine because we have verified the group by expression before.
-            let group_column = group_by_result.vector_value().unwrap();
-            let field_type = group_by_result.field_type();
-            for row_index in 0..rows_len {
-                group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
-                group_column.encode(row_index, field_type, &mut group_by_keys[row_index])?;
-            }
-        }
-        // One extra offset, to be used as the end offset.
+
+        // Decode columns with mutable input first, so subsequent access to input can be immutable
+        // (and the borrow checker will be happy)
+        ensure_columns_decoded(&context.cfg.tz, &self.group_by_exps, src_schema, &mut input)?;
+        //        ensure_columns_decoded(
+        //            &context.cfg.tz,
+        //            &entities.each_aggr_exprs,
+        //            src_schema,
+        //            &mut input,
+        //        )?;
+        let group_by_results = eval_exprs(context, &self.group_by_exps, src_schema, &input)?;
+        //        let aggr_expr_results = eval_exprs(context, &entities.each_aggr_exprs, src_schema, &input)?;
+
         for row_index in 0..rows_len {
+            for group_by_result in &group_by_results {
+                // Unwrap is fine because we have verified the group by expression before.
+                let group_column = group_by_result.vector_value().unwrap();
+
+                group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
+                group_column.encode(
+                    row_index,
+                    group_by_result.field_type(),
+                    &mut group_by_keys[row_index],
+                )?;
+            }
             group_by_keys_offsets[row_index].push(group_by_keys[row_index].len() as u32);
         }
 
@@ -298,6 +314,30 @@ impl<Src: BatchExecutor> AggregationExecutorImpl<Src> for SlowHashAggregationImp
     fn is_partial_results_ready(&self) -> bool {
         false
     }
+}
+
+fn ensure_columns_decoded(
+    tz: &Tz,
+    exprs: &[RpnExpression],
+    schema: &[FieldType],
+    input: &mut LazyBatchColumnVec,
+) -> Result<()> {
+    for expr in exprs {
+        expr.ensure_columns_decoded(tz, schema, input)?;
+    }
+    Ok(())
+}
+
+fn eval_exprs<'a, 'b>(
+    context: &'a mut EvalContext,
+    exprs: &'b [RpnExpression],
+    schema: &'b [FieldType],
+    input: &'b LazyBatchColumnVec,
+) -> Result<Vec<RpnStackNode<'b>>> {
+    exprs
+        .iter()
+        .map(|expr| expr.eval_unchecked(context, input.rows_len(), schema, &input))
+        .collect()
 }
 
 #[cfg(test)]
