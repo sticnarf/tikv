@@ -1067,3 +1067,97 @@ mod tests {
         assert_eq!(val.field_type().tp(), FieldTypeTp::LongLong);
     }
 }
+
+#[cfg(test)]
+mod benches {
+    #![allow(clippy::float_cmp)]
+
+    use test::{black_box, Bencher};
+
+    use super::*;
+
+    use cop_codegen::rpn_fn;
+    use cop_datatype::{EvalType, FieldTypeAccessor, FieldTypeTp};
+    use tipb::expression::FieldType;
+
+    use crate::coprocessor::codec::batch::LazyBatchColumn;
+    use crate::coprocessor::codec::data_type::Real;
+    use crate::coprocessor::codec::datum::{Datum, DatumEncoder};
+    use crate::coprocessor::dag::expr::EvalContext;
+    use crate::coprocessor::dag::rpn_expr::{RpnExpressionBuilder, RpnFn};
+    use crate::coprocessor::Result;
+
+    // Comprehensive expression:
+    //      FnA(
+    //          Col0,
+    //          FnB(),
+    //          FnC(
+    //              FnD(Col1, Const0),
+    //              Const1
+    //          )
+    //      )
+    //
+    // RPN: Col0, FnB, Col1, Const0, FnD, Const1, FnC, FnA
+    #[bench]
+    fn bench_eval_comprehensive(b: &mut Bencher) {
+        /// fn_a(v1, v2, v3) performs v1 * v2 - v3.
+        #[rpn_fn]
+        fn fn_a(v1: &Option<Real>, v2: &Option<Real>, v3: &Option<Real>) -> Result<Option<Real>> {
+            Ok(Some(v1.unwrap() * v2.unwrap() - v3.unwrap()))
+        }
+
+        /// fn_b() returns 42.0.
+        #[rpn_fn]
+        fn fn_b() -> Result<Option<Real>> {
+            Ok(Real::new(42.0).ok())
+        }
+
+        /// fn_c(v1, v2) performs float(v2 - v1).
+        #[rpn_fn]
+        fn fn_c(v1: &Option<i64>, v2: &Option<i64>) -> Result<Option<Real>> {
+            Ok(Real::new((v2.unwrap() - v1.unwrap()) as f64).ok())
+        }
+
+        /// fn_d(v1, v2) performs v1 + v2 * 2.
+        #[rpn_fn]
+        fn fn_d(v1: &Option<i64>, v2: &Option<i64>) -> Result<Option<i64>> {
+            Ok(Some(v1.unwrap() + v2.unwrap() * 2))
+        }
+
+        let mut columns = LazyBatchColumnVec::from(vec![
+            {
+                let mut col = LazyBatchColumn::decoded_with_capacity_and_tp(1024, EvalType::Real);
+                for i in -512..512 {
+                    col.mut_decoded()
+                        .push_real(Real::new(i as f64 / 128.0).ok());
+                }
+                col
+            },
+            {
+                let mut col = LazyBatchColumn::decoded_with_capacity_and_tp(1024, EvalType::Int);
+                for i in -512..512 {
+                    col.mut_decoded().push_int(Some(i));
+                }
+                col
+            },
+        ]);
+        let schema = &[FieldTypeTp::Double.into(), FieldTypeTp::LongLong.into()];
+
+        // Col0, fn_b, Col1, Const0, fn_d, Const1, fn_c, fn_a
+        let exp = RpnExpressionBuilder::new()
+            .push_column_ref(0)
+            .push_fn_call(fn_b_fn(), FieldTypeTp::Double)
+            .push_column_ref(1)
+            .push_constant(7i64)
+            .push_fn_call(fn_d_fn(), FieldTypeTp::LongLong)
+            .push_constant(11i64)
+            .push_fn_call(fn_c_fn(), FieldTypeTp::Double)
+            .push_fn_call(fn_a_fn(), FieldTypeTp::Double)
+            .build();
+
+        let mut ctx = EvalContext::default();
+        b.iter(|| {
+            black_box(exp.eval(&mut ctx, 1024, schema, &mut columns));
+        });
+    }
+}
