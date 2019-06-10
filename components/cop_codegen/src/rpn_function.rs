@@ -135,6 +135,7 @@ impl RpnFnGenerator {
         let (ctx_type, payload_type, result_type) = (ctx_type(), payload_type(), result_type());
         quote! {
             impl #impl_generics #fn_trait_ident #ty_generics for #tp #where_clause {
+                #[inline]
                 fn eval(
                     self,
                     rows: usize,
@@ -216,6 +217,7 @@ impl RpnFnGenerator {
         quote! {
             pub const fn #constructor_ident #impl_generics ()
             -> #rpn_fn_type #where_clause {
+                #[inline]
                 fn run #impl_generics (
                     rows: usize,
                     ctx: &mut #ctx_type,
@@ -374,6 +376,7 @@ mod tests {
                     crate::coprocessor::dag::rpn_expr::function::Null
                 >
             > {
+                #[inline]
                 fn eval(
                     self,
                     rows: usize,
@@ -428,6 +431,7 @@ mod tests {
         let gen = no_generic_fn();
         let expected: TokenStream = r#"
             pub const fn foo_fn() -> crate::coprocessor::dag::rpn_expr::function::RpnFn {
+                #[inline]
                 fn run(
                     rows: usize,
                     ctx: &mut crate::coprocessor::dag::expr::EvalContext,
@@ -521,6 +525,7 @@ mod tests {
                 Arg0_,
                 crate::coprocessor::dag::rpn_expr::function::Null
             > where B: N<M> {
+                #[inline]
                 fn eval(
                     self,
                     rows: usize,
@@ -578,6 +583,7 @@ mod tests {
         let expected: TokenStream = r#"
             pub const fn foo_fn <A: M, B> () -> crate::coprocessor::dag::rpn_expr::function::RpnFn
             where B: N<M> {
+                #[inline]
                 fn run <A: M, B> (
                     rows: usize,
                     ctx: &mut crate::coprocessor::dag::expr::EvalContext,

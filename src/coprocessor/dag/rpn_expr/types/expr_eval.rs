@@ -1102,24 +1102,28 @@ mod benches {
     fn bench_eval_comprehensive(b: &mut Bencher) {
         /// fn_a(v1, v2, v3) performs v1 * v2 - v3.
         #[rpn_fn]
+        #[inline]
         fn fn_a(v1: &Option<Real>, v2: &Option<Real>, v3: &Option<Real>) -> Result<Option<Real>> {
             Ok(Some(v1.unwrap() * v2.unwrap() - v3.unwrap()))
         }
 
         /// fn_b() returns 42.0.
         #[rpn_fn]
+        #[inline]
         fn fn_b() -> Result<Option<Real>> {
             Ok(Real::new(42.0).ok())
         }
 
         /// fn_c(v1, v2) performs float(v2 - v1).
         #[rpn_fn]
+        #[inline]
         fn fn_c(v1: &Option<i64>, v2: &Option<i64>) -> Result<Option<Real>> {
             Ok(Real::new((v2.unwrap() - v1.unwrap()) as f64).ok())
         }
 
         /// fn_d(v1, v2) performs v1 + v2 * 2.
         #[rpn_fn]
+        #[inline]
         fn fn_d(v1: &Option<i64>, v2: &Option<i64>) -> Result<Option<i64>> {
             Ok(Some(v1.unwrap() + v2.unwrap() * 2))
         }

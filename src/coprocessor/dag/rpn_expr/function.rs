@@ -86,7 +86,7 @@ impl<'a, T: Evaluable> RpnFnArg for ScalarArg<'a, T> {
     type Type = &'a Option<T>;
 
     /// Gets the value in the given row. All rows of a `ScalarArg` share the same value.
-    #[inline]
+    #[inline(always)]
     fn get(&self, _row: usize) -> &'a Option<T> {
         self.0
     }
@@ -99,7 +99,7 @@ pub struct VectorArg<'a, T: Evaluable>(&'a [Option<T>]);
 impl<'a, T: Evaluable> RpnFnArg for VectorArg<'a, T> {
     type Type = &'a Option<T>;
 
-    #[inline]
+    #[inline(always)]
     fn get(&self, row: usize) -> &'a Option<T> {
         &self.0[row]
     }
@@ -129,7 +129,7 @@ impl<A: RpnFnArg, Rem: ArgDef> ArgDef for Arg<A, Rem> {}
 impl<A: RpnFnArg, Rem: ArgDef> Arg<A, Rem> {
     /// Gets the value of the head argument in the given row and returns the remaining argument
     /// list.
-    #[inline]
+    #[inline(always)]
     pub fn extract(&self, row: usize) -> (A::Type, &Rem) {
         (self.arg.get(row), &self.rem)
     }
@@ -169,12 +169,14 @@ pub struct ArgConstructor<E: Evaluator> {
 }
 
 impl<E: Evaluator> ArgConstructor<E> {
+    #[inline]
     pub fn new(arg_index: usize, inner: E) -> Self {
         ArgConstructor { arg_index, inner }
     }
 }
 
 impl<E: Evaluator> Evaluator for ArgConstructor<E> {
+    #[inline]
     fn eval<D: ArgDef>(
         self,
         def: D,
