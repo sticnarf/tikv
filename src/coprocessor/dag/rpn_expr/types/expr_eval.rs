@@ -307,7 +307,6 @@ mod tests {
     use crate::coprocessor::dag::expr::EvalContext;
     use crate::coprocessor::dag::rpn_expr::impl_arithmetic::*;
     use crate::coprocessor::dag::rpn_expr::impl_compare::*;
-    use crate::coprocessor::dag::rpn_expr::impl_op::*;
     use crate::coprocessor::dag::rpn_expr::*;
     use crate::coprocessor::Result;
     use test::{black_box, Bencher};
@@ -1366,11 +1365,11 @@ mod tests {
         profiler::start("eval_compare_1024_rows.profile");
         b.iter(|| {
             let result = black_box(&exp).eval(
-                &mut ctx,
-                schema,
+                black_box(&mut ctx),
+                black_box(schema),
                 black_box(&mut columns),
                 black_box(&logical_rows),
-                1024,
+                black_box(1024),
             );
             assert!(result.is_ok());
         });
