@@ -122,6 +122,8 @@ impl RpnFnGenerator {
         let meta = &self.meta;
         let extract =
             (0..self.arg_types.len()).map(|i| Ident::new(&format!("arg{}", i), Span::call_site()));
+        let zip_args = extract.clone();
+        let iter_args = extract.clone();
         let call_arg = extract.clone();
         let ty_generics_turbofish = ty_generics.as_turbofish();
         let (ctx_type, payload_type, result_type) = common_types();
@@ -132,11 +134,12 @@ impl RpnFnGenerator {
                     ctx: &mut #ctx_type,
                     payload: &#payload_type,
                 ) -> #result_type {
-                    let arg = &self;
                     let rows = payload.output_rows();
                     let mut result = Vec::with_capacity(rows);
-                    for row in 0..rows {
-                        #(let (#extract, arg) = arg.extract(row));*;
+                    let arg = &self;
+                    #(let (#extract, arg) = arg.extract(rows));*;
+                    let dummy_iter = std::iter::repeat(()).take(rows);
+                    for (_ #(, #iter_args)*) in izip!(dummy_iter, #(#zip_args),*) {
                         result.push( #fn_ident #ty_generics_turbofish ( #(#meta,)* #(#call_arg),* )?);
                     }
                     Ok(crate::coprocessor::codec::data_type::Evaluable::into_vector_value(result))
@@ -269,22 +272,19 @@ mod tests {
     use super::*;
 
     fn no_generic_fn() -> RpnFnGenerator {
-        let item_fn = parse_str(
-            r#"
+        let item_fn = quote! {
             #[inline]
             fn foo(arg0: &Option<Int>, arg1: &Option<Real>) -> Result<Option<Decimal>> {
                 Ok(None)
             }
-        "#,
-        )
-        .unwrap();
-        RpnFnGenerator::new(vec![], item_fn).unwrap()
+        };
+        RpnFnGenerator::new(vec![], syn::parse2(item_fn).unwrap()).unwrap()
     }
 
     #[test]
     fn test_no_generic_generate_fn_trait() {
         let gen = no_generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             trait Foo_Fn {
                 fn eval(
                     self,
@@ -292,16 +292,14 @@ mod tests {
                     payload: &crate::coprocessor::dag::rpn_expr::types::RpnFnCallPayload,
                 ) -> crate::coprocessor::Result<crate::coprocessor::codec::data_type::VectorValue> ;
             }
-        "#
-        .parse()
-        .unwrap();
+        };
         assert_eq!(expected.to_string(), gen.generate_fn_trait().to_string());
     }
 
     #[test]
     fn test_no_generic_generate_dummy_fn_trait_impl() {
         let gen = no_generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             impl<D_: crate::coprocessor::dag::rpn_expr::function::ArgDef> Foo_Fn for D_ {
                 default fn eval(
                     self,
@@ -311,9 +309,7 @@ mod tests {
                     panic!("Cannot apply {} on {:?}", "foo", self)
                 }
             }
-        "#
-        .parse()
-        .unwrap();
+        };
         assert_eq!(
             expected.to_string(),
             gen.generate_dummy_fn_trait_impl().to_string()
@@ -323,7 +319,7 @@ mod tests {
     #[test]
     fn test_no_generic_generate_real_fn_trait_impl() {
         let gen = no_generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             impl<
                 'arg_,
                 Arg1_: crate::coprocessor::dag::rpn_expr::function::RpnFnArg<Type = & 'arg_ Option<Real> > ,
@@ -340,20 +336,19 @@ mod tests {
                     ctx: &mut crate::coprocessor::dag::expr::EvalContext,
                     payload: &crate::coprocessor::dag::rpn_expr::types::RpnFnCallPayload,
                 ) -> crate::coprocessor::Result<crate::coprocessor::codec::data_type::VectorValue> {
-                    let arg = &self;
                     let rows = payload.output_rows();
                     let mut result = Vec::with_capacity(rows);
-                    for row in 0..rows {
-                        let (arg0, arg) = arg.extract(row);
-                        let (arg1, arg) = arg.extract(row);
+                    let arg = &self;
+                    let (arg0, arg) = arg.extract(rows);
+                    let (arg1, arg) = arg.extract(rows);
+                    let dummy_iter = std::iter::repeat(()).take(rows);
+                    for (_, arg0, arg1) in izip!(dummy_iter, arg0, arg1) {
                         result.push(foo(arg0, arg1)?);
                     }
                     Ok(crate::coprocessor::codec::data_type::Evaluable::into_vector_value(result))
                 }
             }
-        "#
-            .parse()
-            .unwrap();
+        };
         assert_eq!(
             expected.to_string(),
             gen.generate_real_fn_trait_impl().to_string()
@@ -363,7 +358,7 @@ mod tests {
     #[test]
     fn test_no_generic_generate_evaluator() {
         let gen = no_generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             pub struct Foo_Evaluator ( std::marker::PhantomData <()> ) ;
 
             impl crate::coprocessor::dag::rpn_expr::function::Evaluator for Foo_Evaluator {
@@ -377,16 +372,14 @@ mod tests {
                     Foo_Fn :: eval(def, ctx, payload)
                 }
             }
-        "#
-        .parse()
-        .unwrap();
+        };
         assert_eq!(expected.to_string(), gen.generate_evaluator().to_string());
     }
 
     #[test]
     fn test_no_generic_generate_constructor() {
         let gen = no_generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             pub const fn foo_fn_meta() -> crate::coprocessor::dag::rpn_expr::function::RpnFnMeta {
                 #[inline]
                 fn run(
@@ -408,29 +401,24 @@ mod tests {
                     fn_ptr: run,
                 }
             }
-        "#
-            .parse()
-            .unwrap();
+        };
         assert_eq!(expected.to_string(), gen.generate_constructor().to_string());
     }
 
     fn generic_fn() -> RpnFnGenerator {
-        let item_fn = parse_str(
-            r#"
+        let item_fn = quote! {
             fn foo<A: M, B>(arg0: &Option<A::X>) -> Result<Option<B>>
             where B: N<M> {
                 Ok(None)
             }
-        "#,
-        )
-        .unwrap();
-        RpnFnGenerator::new(vec![], item_fn).unwrap()
+        };
+        RpnFnGenerator::new(vec![], syn::parse2(item_fn).unwrap()).unwrap()
     }
 
     #[test]
     fn test_generic_generate_fn_trait() {
         let gen = generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             trait Foo_Fn<A: M, B>
             where B: N<M> {
                 fn eval(
@@ -439,16 +427,14 @@ mod tests {
                     payload: &crate::coprocessor::dag::rpn_expr::types::RpnFnCallPayload,
                 ) -> crate::coprocessor::Result<crate::coprocessor::codec::data_type::VectorValue> ;
             }
-        "#
-        .parse()
-        .unwrap();
+        };
         assert_eq!(expected.to_string(), gen.generate_fn_trait().to_string());
     }
 
     #[test]
     fn test_generic_generate_dummy_fn_trait_impl() {
         let gen = generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             impl<
                 A: M,
                 B,
@@ -463,9 +449,7 @@ mod tests {
                     panic!("Cannot apply {} on {:?}", "foo", self)
                 }
             }
-        "#
-        .parse()
-        .unwrap();
+        };
         assert_eq!(
             expected.to_string(),
             gen.generate_dummy_fn_trait_impl().to_string()
@@ -475,7 +459,7 @@ mod tests {
     #[test]
     fn test_generic_generate_real_fn_trait_impl() {
         let gen = generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             impl<
                 'arg_,
                 A: M,
@@ -490,19 +474,18 @@ mod tests {
                     ctx: &mut crate::coprocessor::dag::expr::EvalContext,
                     payload: &crate::coprocessor::dag::rpn_expr::types::RpnFnCallPayload,
                 ) -> crate::coprocessor::Result<crate::coprocessor::codec::data_type::VectorValue> {
-                    let arg = &self;
                     let rows = payload.output_rows();
                     let mut result = Vec::with_capacity(rows);
-                    for row in 0..rows {
-                        let (arg0, arg) = arg.extract(row);
+                    let arg = &self;
+                    let (arg0, arg) = arg.extract(rows);
+                    let dummy_iter = std::iter::repeat((())).take(rows);
+                    for (_, arg0) in izip!(dummy_iter, arg0) {
                         result.push(foo :: <A, B> (arg0)?);
                     }
                     Ok(crate::coprocessor::codec::data_type::Evaluable::into_vector_value(result))
                 }
             }
-        "#
-            .parse()
-            .unwrap();
+        };
         assert_eq!(
             expected.to_string(),
             gen.generate_real_fn_trait_impl().to_string()
@@ -512,11 +495,11 @@ mod tests {
     #[test]
     fn test_generic_generate_evaluator() {
         let gen = generic_fn();
-        let expected: TokenStream = r#"
+        let expected = quote! {
             pub struct Foo_Evaluator<A: M, B> (std::marker::PhantomData<(A, B)>)
                 where B: N<M> ;
 
-            impl<A: M, B> crate::coprocessor::dag::rpn_expr::function::Evaluator 
+            impl<A: M, B> crate::coprocessor::dag::rpn_expr::function::Evaluator
                 for Foo_Evaluator<A, B>
                 where B: N<M> {
                 #[inline]
@@ -529,17 +512,15 @@ mod tests {
                     Foo_Fn :: <A, B> :: eval(def, ctx, payload)
                 }
             }
-        "#
-        .parse()
-        .unwrap();
+        };
         assert_eq!(expected.to_string(), gen.generate_evaluator().to_string());
     }
 
     #[test]
     fn test_generic_generate_constructor() {
         let gen = generic_fn();
-        let expected: TokenStream = r#"
-            pub const fn foo_fn <A: M, B> () -> crate::coprocessor::dag::rpn_expr::function::RpnFn
+        let expected = quote! {
+            pub const fn foo_fn_meta <A: M, B> () -> crate::coprocessor::dag::rpn_expr::function::RpnFnMeta
             where B: N<M> {
                 #[inline]
                 fn run <A: M, B> (
@@ -549,19 +530,17 @@ mod tests {
                 where B: N<M> {
                     use crate::coprocessor::dag::rpn_expr::function::{ArgConstructor, Evaluator, Null};
                     ArgConstructor::new(
-                        0usize, 
+                        0usize,
                         Foo_Evaluator :: < A , B > (std::marker::PhantomData)
                     ).eval(Null, ctx, payload)
                 }
-                crate::coprocessor::dag::rpn_expr::function::RpnFn {
+                crate::coprocessor::dag::rpn_expr::function::RpnFnMeta {
                     name: "foo",
                     args_len: 1usize,
                     fn_ptr: run :: <A, B> ,
                 }
             }
-        "#
-            .parse()
-            .unwrap();
+        };
         assert_eq!(expected.to_string(), gen.generate_constructor().to_string());
     }
 }

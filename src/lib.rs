@@ -63,6 +63,8 @@ extern crate more_asserts;
 #[macro_use]
 extern crate vlog;
 #[macro_use]
+extern crate itertools;
+#[macro_use]
 extern crate tikv_util;
 #[macro_use]
 extern crate match_template;

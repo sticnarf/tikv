@@ -83,6 +83,8 @@ use super::types::{RpnFnCallPayload, RpnStackNode};
 use crate::coprocessor::codec::data_type::{Evaluable, ScalarValue, VectorValue};
 use crate::coprocessor::dag::expr::EvalContext;
 use crate::coprocessor::Result;
+use std::iter::{self, Iterator, Repeat, Take};
+use std::slice;
 
 #[derive(Clone, Copy)]
 /// Metadata of an RPN function
@@ -111,9 +113,13 @@ impl std::fmt::Debug for RpnFnMeta {
 /// A single argument of an RPN function.
 pub trait RpnFnArg: std::fmt::Debug {
     type Type;
+    type Iter: Iterator<Item = Self::Type>;
 
     /// Gets the value in the given row.
     fn get(&self, row: usize) -> Self::Type;
+
+    /// Creates an iterator over the argument
+    fn iter(&self, rows: usize) -> Self::Iter;
 }
 
 /// Represents an RPN function argument of a `ScalarValue`.
@@ -122,11 +128,17 @@ pub struct ScalarArg<'a, T: Evaluable>(&'a Option<T>);
 
 impl<'a, T: Evaluable> RpnFnArg for ScalarArg<'a, T> {
     type Type = &'a Option<T>;
+    type Iter = Take<Repeat<&'a Option<T>>>;
 
     /// Gets the value in the given row. All rows of a `ScalarArg` share the same value.
     #[inline]
     fn get(&self, _row: usize) -> &'a Option<T> {
         self.0
+    }
+
+    #[inline]
+    fn iter(&self, rows: usize) -> Self::Iter {
+        iter::repeat(self.0).take(rows)
     }
 }
 
@@ -139,10 +151,36 @@ pub struct VectorArg<'a, T: Evaluable> {
 
 impl<'a, T: Evaluable> RpnFnArg for VectorArg<'a, T> {
     type Type = &'a Option<T>;
+    type Iter = VectorArgIter<'a, T>;
 
     #[inline]
     fn get(&self, row: usize) -> &'a Option<T> {
         &self.physical_col[self.logical_rows[row]]
+    }
+
+    #[inline]
+    fn iter(&self, rows: usize) -> Self::Iter {
+        assert_eq!(rows, self.logical_rows.len());
+        VectorArgIter {
+            physical_col: self.physical_col,
+            logical_rows_iter: self.logical_rows.iter(),
+        }
+    }
+}
+
+pub struct VectorArgIter<'a, T: Evaluable> {
+    physical_col: &'a [Option<T>],
+    logical_rows_iter: slice::Iter<'a, usize>,
+}
+
+impl<'a, T: Evaluable> Iterator for VectorArgIter<'a, T> {
+    type Item = &'a Option<T>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        self.logical_rows_iter
+            .next()
+            .map(|&row| &self.physical_col[row])
     }
 }
 
@@ -168,11 +206,11 @@ pub struct Arg<A: RpnFnArg, Rem: ArgDef> {
 impl<A: RpnFnArg, Rem: ArgDef> ArgDef for Arg<A, Rem> {}
 
 impl<A: RpnFnArg, Rem: ArgDef> Arg<A, Rem> {
-    /// Gets the value of the head argument in the given row and returns the remaining argument
-    /// list.
+    /// Gets the iterator over the head argument in the given row and returns the remaining
+    /// argument list.
     #[inline]
-    pub fn extract(&self, row: usize) -> (A::Type, &Rem) {
-        (self.arg.get(row), &self.rem)
+    pub fn extract(&self, rows: usize) -> (A::Iter, &Rem) {
+        (self.arg.iter(rows), &self.rem)
     }
 }
 
