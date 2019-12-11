@@ -69,7 +69,6 @@ pub struct GcConfig {
     pub ratio_threshold: f64,
     pub batch_keys: usize,
     pub max_write_bytes_per_sec: ReadableSize,
-    pub keep_last_delete: bool,
 }
 
 impl Default for GcConfig {
@@ -78,7 +77,6 @@ impl Default for GcConfig {
             ratio_threshold: DEFAULT_GC_RATIO_THRESHOLD,
             batch_keys: DEFAULT_GC_BATCH_KEYS,
             max_write_bytes_per_sec: ReadableSize(DEFAULT_GC_MAX_WRITE_BYTES_PER_SEC),
-            keep_last_delete: false,
         }
     }
 }
@@ -96,10 +94,20 @@ impl GcConfig {
 /// TODO: Give it a better name?
 pub trait GcSafePointProvider: Send + 'static {
     fn get_safe_point(&self) -> Result<TimeStamp>;
+
+    fn get_keep_last_delete(&self) -> Result<bool>;
 }
 
 impl<T: PdClient + 'static> GcSafePointProvider for Arc<T> {
     fn get_safe_point(&self) -> Result<TimeStamp> {
+        let future = self.get_gc_safe_point();
+        future
+            .wait()
+            .map(Into::into)
+            .map_err(|e| box_err!("failed to get safe point from PD: {:?}", e))
+    }
+
+    fn get_keep_last_delete(&self) -> Result<bool> {
         let future = self.get_gc_safe_point();
         future
             .wait()
@@ -112,6 +120,7 @@ enum GcTask {
     Gc {
         ctx: Context,
         safe_point: TimeStamp,
+        keep_last_delete: bool,
         callback: Callback<()>,
     },
     UnsafeDestroyRange {
@@ -147,13 +156,17 @@ impl Display for GcTask {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             GcTask::Gc {
-                ctx, safe_point, ..
+                ctx,
+                safe_point,
+                keep_last_delete,
+                ..
             } => {
                 let epoch = format!("{:?}", ctx.region_epoch.as_ref());
                 f.debug_struct("GC")
                     .field("region_id", &ctx.get_region_id())
                     .field("region_epoch", &epoch)
                     .field("safe_point", safe_point)
+                    .field("keep_last_delete", keep_last_delete)
                     .finish()
             }
             GcTask::UnsafeDestroyRange {
@@ -173,9 +186,6 @@ struct GcRunner<E: Engine> {
     local_storage: Option<Arc<DB>>,
     raft_store_router: Option<ServerRaftStoreRouter>,
 
-    /// Used to control whether to keep the last delete record
-    keep_last_delete: Arc<atomic::AtomicBool>,
-
     /// Used to limit the write flow of GC.
     limiter: Arc<Mutex<Option<RocksIOLimiter>>>,
 
@@ -189,8 +199,6 @@ impl<E: Engine> GcRunner<E> {
         engine: E,
         local_storage: Option<Arc<DB>>,
         raft_store_router: Option<ServerRaftStoreRouter>,
-        keep_last_delete: Arc<atomic::AtomicBool>,
-
         limiter: Arc<Mutex<Option<RocksIOLimiter>>>,
         cfg: GcConfig,
     ) -> Self {
@@ -198,7 +206,6 @@ impl<E: Engine> GcRunner<E> {
             engine,
             local_storage,
             raft_store_router,
-            keep_last_delete,
             limiter,
             cfg,
             stats: Statistics::default(),
@@ -318,7 +325,12 @@ impl<E: Engine> GcRunner<E> {
         Ok(next_scan_key)
     }
 
-    fn gc(&mut self, ctx: &mut Context, safe_point: TimeStamp) -> Result<()> {
+    fn gc(
+        &mut self,
+        ctx: &mut Context,
+        safe_point: TimeStamp,
+        keep_last_delete: bool,
+    ) -> Result<()> {
         debug!(
             "start doing GC";
             "region_id" => ctx.get_region_id(),
@@ -326,7 +338,6 @@ impl<E: Engine> GcRunner<E> {
         );
 
         let mut next_key = None;
-        let keep_last_delete = self.keep_last_delete.load(atomic::Ordering::SeqCst);
         loop {
             // Scans at most `GcConfig.batch_keys` keys
             let (keys, next) = self
@@ -447,8 +458,11 @@ impl<E: Engine> GcRunner<E> {
 
         let result = match &mut task {
             GcTask::Gc {
-                ctx, safe_point, ..
-            } => self.gc(ctx, *safe_point),
+                ctx,
+                safe_point,
+                keep_last_delete,
+                ..
+            } => self.gc(ctx, *safe_point, *keep_last_delete),
             GcTask::UnsafeDestroyRange {
                 ctx,
                 start_key,
@@ -513,23 +527,31 @@ fn schedule_gc(
     scheduler: &worker::Scheduler<GcTask>,
     ctx: Context,
     safe_point: TimeStamp,
+    keep_last_delete: bool,
     callback: Callback<()>,
 ) -> Result<()> {
     scheduler
         .schedule(GcTask::Gc {
             ctx,
             safe_point,
+            keep_last_delete,
             callback,
         })
         .or_else(handle_gc_task_schedule_error)
 }
 
 /// Does GC synchronously.
-fn gc(scheduler: &worker::Scheduler<GcTask>, ctx: Context, safe_point: TimeStamp) -> Result<()> {
-    wait_op!(|callback| schedule_gc(scheduler, ctx, safe_point, callback)).unwrap_or_else(|| {
-        error!("failed to receive result of gc");
-        Err(box_err!("gc_worker: failed to receive result of gc"))
-    })
+fn gc(
+    scheduler: &worker::Scheduler<GcTask>,
+    ctx: Context,
+    safe_point: TimeStamp,
+    keep_last_delete: bool,
+) -> Result<()> {
+    wait_op!(|callback| schedule_gc(scheduler, ctx, safe_point, keep_last_delete, callback))
+        .unwrap_or_else(|| {
+            error!("failed to receive result of gc");
+            Err(box_err!("gc_worker: failed to receive result of gc"))
+        })
 }
 
 /// The configurations of automatic GC.
@@ -742,6 +764,10 @@ struct GcManager<S: GcSafePointProvider, R: RegionInfoProvider> {
 
     safe_point_last_check_time: Instant,
 
+    /// Whether to keep the latest delete record. `GcManager` will try to update it together with
+    /// safe_point. It is set to `true` when there is a incremental backup in progress.
+    keep_latest_delete: bool,
+
     /// Used to schedule `GcTask`s.
     worker_scheduler: worker::Scheduler<GcTask>,
 
@@ -758,6 +784,7 @@ impl<S: GcSafePointProvider, R: RegionInfoProvider> GcManager<S, R> {
             cfg,
             safe_point: TimeStamp::zero(),
             safe_point_last_check_time: Instant::now(),
+            keep_latest_delete: false,
             worker_scheduler,
             gc_manager_ctx: GcManagerContext::new(),
         }
@@ -820,6 +847,7 @@ impl<S: GcSafePointProvider, R: RegionInfoProvider> GcManager<S, R> {
     fn initialize(&mut self) {
         debug!("gc-manager is initializing");
         self.safe_point = TimeStamp::zero();
+        self.keep_last_delete = false;
         self.try_update_safe_point();
         debug!("gc-manager started"; "safe_point" => self.safe_point);
     }
@@ -1119,7 +1147,6 @@ pub struct GcWorker<E: Engine> {
     raft_store_router: Option<ServerRaftStoreRouter>,
 
     cfg: Option<GcConfig>,
-    keep_last_delete: Arc<atomic::AtomicBool>,
     limiter: Arc<Mutex<Option<RocksIOLimiter>>>,
 
     /// How many strong references. The worker will be stopped
@@ -1141,7 +1168,6 @@ impl<E: Engine> Clone for GcWorker<E> {
             local_storage: self.local_storage.clone(),
             raft_store_router: self.raft_store_router.clone(),
             cfg: self.cfg.clone(),
-            keep_last_delete: self.keep_last_delete.clone(),
             limiter: self.limiter.clone(),
             refs: self.refs.clone(),
             worker: self.worker.clone(),
@@ -1180,7 +1206,6 @@ impl<E: Engine> GcWorker<E> {
                 .create(),
         ));
         let worker_scheduler = worker.lock().unwrap().scheduler();
-        let keep_last_delete = atomic::AtomicBool::new(cfg.keep_last_delete);
         let limiter = if cfg.max_write_bytes_per_sec.0 > 0 {
             let bps = i64::try_from(cfg.max_write_bytes_per_sec.0)
                 .expect("snap_max_write_bytes_per_sec > i64::max_value");
@@ -1193,7 +1218,6 @@ impl<E: Engine> GcWorker<E> {
             local_storage,
             raft_store_router,
             cfg: Some(cfg),
-            keep_last_delete: Arc::new(keep_last_delete),
             limiter: Arc::new(Mutex::new(limiter)),
             refs: Arc::new(atomic::AtomicUsize::new(1)),
             worker,
@@ -1218,7 +1242,6 @@ impl<E: Engine> GcWorker<E> {
             self.engine.clone(),
             self.local_storage.take(),
             self.raft_store_router.take(),
-            self.keep_last_delete.clone(),
             self.limiter.clone(),
             self.cfg.take().unwrap(),
         );
@@ -1254,6 +1277,8 @@ impl<E: Engine> GcWorker<E> {
             .schedule(GcTask::Gc {
                 ctx,
                 safe_point,
+                // remove the last delete record on legacy GC
+                keep_last_delete: false,
                 callback,
             })
             .or_else(handle_gc_task_schedule_error)
@@ -1293,12 +1318,6 @@ impl<E: Engine> GcWorker<E> {
         }
         info!("GC io limit changed"; "max_write_bytes_per_sec" => limit);
         Ok(())
-    }
-
-    pub fn change_keep_last_delete(&self, keep_last_delete: bool) {
-        self.keep_last_delete
-            .store(keep_last_delete, atomic::Ordering::SeqCst);
-        info!("GC keep_last_delete changed"; "keep_last_delete" => keep_last_delete);
     }
 }
 
@@ -1873,21 +1892,5 @@ mod tests {
         // Disable io limit
         gc_worker.change_io_limit(0).unwrap();
         assert!(gc_worker.limiter.lock().unwrap().is_none());
-    }
-
-    #[test]
-    fn test_change_keep_last_delete() {
-        let engine = TestEngineBuilder::new().build().unwrap();
-        let mut gc_worker = GcWorker::new(engine, None, None, GcConfig::default());
-        gc_worker.start().unwrap();
-        assert!(!gc_worker.keep_last_delete.load(atomic::Ordering::SeqCst));
-
-        // Change to keep last delete
-        gc_worker.change_keep_last_delete(true);
-        assert!(gc_worker.keep_last_delete.load(atomic::Ordering::SeqCst));
-
-        // Change to remove last delete
-        gc_worker.change_keep_last_delete(false);
-        assert!(!gc_worker.keep_last_delete.load(atomic::Ordering::SeqCst));
     }
 }
