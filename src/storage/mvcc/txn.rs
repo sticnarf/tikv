@@ -739,7 +739,12 @@ impl<S: Snapshot> MvccTxn<S> {
         }
     }
 
-    pub fn gc(&mut self, key: Key, safe_point: TimeStamp) -> Result<GcInfo> {
+    pub fn gc(
+        &mut self,
+        key: Key,
+        safe_point: TimeStamp,
+        keep_last_delete: bool,
+    ) -> Result<GcInfo> {
         let mut remove_older = false;
         let mut ts = TimeStamp::max();
         let mut found_versions = 0;
@@ -791,10 +796,13 @@ impl<S: Snapshot> MvccTxn<S> {
                 WriteType::Put => {}
             }
         }
-        if let Some(commit) = latest_delete {
-            self.delete_write(key, commit);
-            deleted_versions += 1;
+        if !keep_last_delete {
+            if let Some(commit) = latest_delete {
+                self.delete_write(key, commit);
+                deleted_versions += 1;
+            }
         }
+
         MVCC_VERSIONS_HISTOGRAM.observe(found_versions as f64);
         if deleted_versions > 0 {
             GC_DELETE_VERSIONS_HISTOGRAM.observe(deleted_versions as f64);
