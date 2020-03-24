@@ -5209,7 +5209,7 @@ checksum = "541b12c998c5b56aa2b4e6f18f03664eef9a4fd0a246a55594efae6cc2d964b5"
 [[package]]
 name = "yatp"
 version = "0.0.1"
-source = "git+https://github.com/tikv/yatp.git#9097bcffc1d64d25a27595dd5c3d47d54b9198fa"
+source = "git+https://github.com/sticnarf/yatp.git?branch=no-yield-local-spawn#355a567705961e10d3edcad30fdab1de8a1a253d"
 dependencies = [
  "crossbeam-deque",
  "dashmap",

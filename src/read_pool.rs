@@ -12,7 +12,7 @@ use tikv_util::time::Instant;
 use yatp::pool::{CloneRunnerBuilder, Local, Runner};
 use yatp::queue::{multilevel, Extras, QueueType};
 use yatp::task::future::{Runner as FutureRunner, TaskCell};
-use yatp::Remote;
+use yatp::Handle;
 
 use self::metrics::*;
 use crate::config::UnifiedReadPoolConfig;
@@ -49,7 +49,7 @@ impl ReadPool {
                 running_tasks,
                 max_tasks,
             } => ReadPoolHandle::Yatp {
-                remote: pool.remote().clone(),
+                remote: pool.handle().clone(),
                 running_tasks: running_tasks.clone(),
                 max_tasks: *max_tasks,
             },
@@ -65,7 +65,7 @@ pub enum ReadPoolHandle {
         read_pool_low: FuturePool,
     },
     Yatp {
-        remote: Remote<TaskCell>,
+        remote: Handle<TaskCell>,
         running_tasks: IntGauge,
         max_tasks: usize,
     },
