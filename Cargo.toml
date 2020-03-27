@@ -175,6 +175,9 @@ protobuf = { git = "https://github.com/pingcap/rust-protobuf", rev = "b67d432c1b
 protobuf-codegen = { git = "https://github.com/pingcap/rust-protobuf", rev = "b67d432c1b74350b38a5d96ddf885ac6c3ff46f5" }
 prometheus = { git = "https://github.com/tikv/rust-prometheus.git", rev = "4b445b20ca1b0aa3f79c35b4885dc3ba716d30e0" }
 
+[patch.'https://github.com/tikv/yatp.git']
+yatp = { git = "https://github.com/sticnarf/yatp.git", branch = "no-busy-hint" }
+
 [target.'cfg(target_os = "linux")'.dependencies]
 procinfo = { git = "https://github.com/tikv/procinfo-rs", rev = "5125fc1a69496b73b26b3c08b6e8afc3c665a56e" }
 
