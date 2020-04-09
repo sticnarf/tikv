@@ -269,7 +269,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
                 result
             },
             priority,
-            start_ts.into_inner(),
+            task_id(start_ts),
         );
 
         res.map_err(|_| Error::from(ErrorInner::SchedTooBusy))
@@ -388,7 +388,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
                 result
             },
             priority,
-            start_ts.into_inner(),
+            task_id(start_ts),
         );
 
         res.map_err(|_| Error::from(ErrorInner::SchedTooBusy))
@@ -454,7 +454,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
                 result
             },
             priority,
-            start_ts.into_inner(),
+            task_id(start_ts),
         );
 
         res.map_err(|_| Error::from(ErrorInner::SchedTooBusy))
@@ -1114,6 +1114,15 @@ fn get_priority_tag(priority: CommandPri) -> CommandPriority {
         CommandPri::Low => CommandPriority::low,
         CommandPri::Normal => CommandPriority::normal,
         CommandPri::High => CommandPriority::high,
+    }
+}
+
+fn task_id(start_ts: TimeStamp) -> u64 {
+    let start_ts = start_ts.into_inner();
+    if start_ts == 0 || start_ts == std::u64::max() {
+        thread_rng().gen()
+    } else {
+        start_ts
     }
 }
 
