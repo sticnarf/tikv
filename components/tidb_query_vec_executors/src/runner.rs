@@ -346,15 +346,9 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
         let mut warnings = self.config.new_eval_warnings();
         let mut ctx = EvalContext::new(self.config.clone());
 
-        let mut time_slice_start = Instant::now();
+        let mut time_slice_len = Duration::default();
+        let mut batch_start = Instant::now();
         loop {
-            let time_slice_len = time_slice_start.elapsed();
-            // Check whether we should yield from the execution
-            if time_slice_len > MAX_TIME_SLICE {
-                reschedule().await;
-                time_slice_start = Instant::now();
-            }
-
             self.deadline.check()?;
 
             let mut result = self.out_most_executor.next_batch(batch_size);
@@ -462,8 +456,20 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
                 return Ok(sel_resp);
             }
 
+            let now = Instant::now();
+            let batch_len = now - batch_start;
+            time_slice_len += now - batch_start;
+            // Check whether we should yield from the execution
+            if time_slice_len > MAX_TIME_SLICE {
+                reschedule().await;
+                time_slice_len = Duration::default();
+                batch_start = Instant::now();
+            } else {
+                batch_start = now;
+            }
+
             // Grow batch size
-            if batch_size < BATCH_MAX_SIZE {
+            if batch_len < MAX_TIME_SLICE && batch_size < BATCH_MAX_SIZE {
                 batch_size *= BATCH_GROW_FACTOR;
                 if batch_size > BATCH_MAX_SIZE {
                     batch_size = BATCH_MAX_SIZE
