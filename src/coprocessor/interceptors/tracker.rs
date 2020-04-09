@@ -4,7 +4,9 @@ use pin_project::pin_project;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::{Instant};
 
+use crate::coprocessor::metrics::*;
 use crate::coprocessor::tracker::Tracker as CopTracker;
 
 pub fn track<'a, F: Future + 'a>(
@@ -42,7 +44,9 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let this = self.project();
         this.cop_tracker.on_begin_item();
+        let begin = Instant::now();
         let res = this.fut.poll(cx);
+        COPR_TIME_SLICE.observe(begin.elapsed().as_secs_f64());
         this.cop_tracker.on_finish_item(None);
         res
     }

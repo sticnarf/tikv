@@ -81,6 +81,11 @@ lazy_static! {
         "The number of tasks waiting for the semaphore"
     )
     .unwrap();
+    pub static ref COPR_TIME_SLICE: Histogram = register_histogram!(
+        "tikv_coprocessor_time_slice",
+        "The time slice coprocessor execution"
+    )
+    .unwrap();
 }
 
 make_static_metric! {
