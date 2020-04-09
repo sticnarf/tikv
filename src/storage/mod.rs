@@ -1119,7 +1119,7 @@ fn get_priority_tag(priority: CommandPri) -> CommandPriority {
 
 fn task_id(start_ts: TimeStamp) -> u64 {
     let start_ts = start_ts.into_inner();
-    if start_ts == 0 || start_ts == std::u64::max() {
+    if start_ts == 0 || start_ts == u64::max_value() {
         thread_rng().gen()
     } else {
         start_ts
