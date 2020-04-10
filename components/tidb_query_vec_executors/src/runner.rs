@@ -414,6 +414,8 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
                 }
             }
 
+            COPR_BATCH_SIZE.observe(batch_size as f64);
+
             if is_drained {
                 self.out_most_executor
                     .collect_exec_stats(&mut self.exec_stats);

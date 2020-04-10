@@ -40,4 +40,10 @@ lazy_static::lazy_static! {
 lazy_static::lazy_static! {
     pub static ref EXECUTOR_COUNT_METRICS: LocalCoprExecutorCount =
         auto_flush_from!(COPR_EXECUTOR_COUNT, LocalCoprExecutorCount);
+
+    pub static ref COPR_BATCH_SIZE: Histogram = register_histogram!(
+        "tikv_coprocessor_batch_size",
+        "The batch size of coprocessor execution"
+    )
+    .unwrap();
 }
