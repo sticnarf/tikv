@@ -160,8 +160,9 @@ impl<S: Storage, I: ScanExecutorImpl> BatchExecutor for ScanExecutor<S, I> {
     }
 
     #[inline]
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         assert!(!self.is_ended);
+        let scan_rows = scan_rows.current_size;
         assert!(scan_rows > 0);
 
         let mut logical_columns = self.imp.build_column_vec(scan_rows);

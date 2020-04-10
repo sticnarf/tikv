@@ -11,12 +11,17 @@ use tipb::{self, ExecType, ExecutorExecutionSummary, FieldType};
 use tipb::{Chunk, DagRequest, EncodeType, SelectResponse};
 use yatp::task::future::reschedule;
 
-use super::interface::{BatchExecutor, ExecuteStats};
+use super::interface::{BatchExecutor, BatchSize, ExecuteStats};
 use super::*;
 use tidb_query_common::metrics::*;
 use tidb_query_common::storage::Storage;
 use tidb_query_common::Result;
 use tidb_query_datatype::expr::{EvalConfig, EvalContext};
+
+const INITIAL_BATCH_SIZE: BatchSize = BatchSize {
+    current_size: 32,
+    max_size: 1024,
+};
 
 // TODO: The value is chosen according to some very subjective experience, which is not tuned
 // carefully. We need to benchmark to find a best value. Also we may consider accepting this value
@@ -342,7 +347,7 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
 
     pub async fn handle_request(&mut self) -> Result<SelectResponse> {
         let mut chunks = vec![];
-        let mut batch_size = BATCH_INITIAL_SIZE;
+        let mut batch_size = INITIAL_BATCH_SIZE;
         let mut warnings = self.config.new_eval_warnings();
         let mut ctx = EvalContext::new(self.config.clone());
 
@@ -414,7 +419,7 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
                 }
             }
 
-            COPR_BATCH_SIZE.observe(batch_size as f64);
+            COPR_BATCH_SIZE.observe(batch_size.max_size as f64);
 
             if is_drained {
                 self.out_most_executor
@@ -471,17 +476,17 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
             }
 
             // Grow batch size
-            if batch_len < MAX_TIME_SLICE / 3 && batch_size < BATCH_MAX_SIZE {
-                batch_size *= BATCH_GROW_FACTOR;
-                if batch_size > BATCH_MAX_SIZE {
-                    batch_size = BATCH_MAX_SIZE
+            if batch_len < MAX_TIME_SLICE / 3 {
+                if batch_size.max_size < BATCH_MAX_SIZE {
+                    batch_size.max_size = usize::min(BATCH_MAX_SIZE, batch_size.max_size * 2);
                 }
+                batch_size.current_size =
+                    usize::min(batch_size.current_size * 2, batch_size.max_size);
             }
-            if batch_len > MAX_TIME_SLICE && batch_size > BATCH_INITIAL_SIZE {
-                batch_size /= 2;
-                if batch_size < BATCH_INITIAL_SIZE {
-                    batch_size = BATCH_INITIAL_SIZE;
-                }
+            // Limit batch size
+            if batch_len > MAX_TIME_SLICE / 2 {
+                batch_size.max_size = usize::max(BATCH_INITIAL_SIZE, batch_size.max_size / 2);
+                batch_size.current_size = usize::min(batch_size.current_size, batch_size.max_size);
             }
         }
     }

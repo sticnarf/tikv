@@ -32,7 +32,7 @@ impl<Src: BatchExecutor> BatchExecutor for BatchStreamAggregationExecutor<Src> {
     }
 
     #[inline]
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         self.0.next_batch(scan_rows)
     }
 
@@ -488,7 +488,7 @@ mod tests {
             AllAggrDefinitionParser,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0, 1]);
         assert_eq!(r.physical_columns.rows_len(), 2);
         assert_eq!(r.physical_columns.columns_len(), 5);
@@ -519,12 +519,12 @@ mod tests {
             &[None, Real::new(3.5).ok()]
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0]);
         assert_eq!(r.physical_columns.rows_len(), 1);
         assert_eq!(r.physical_columns.columns_len(), 5);
@@ -572,7 +572,7 @@ mod tests {
             AllAggrDefinitionParser,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0, 1]);
         assert_eq!(r.physical_columns.rows_len(), 2);
         assert_eq!(r.physical_columns.columns_len(), 2);
@@ -588,12 +588,12 @@ mod tests {
             &[None, Real::new(1.5).ok()]
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0]);
         assert_eq!(r.physical_columns.rows_len(), 1);
         assert_eq!(r.physical_columns.columns_len(), 2);

@@ -28,7 +28,7 @@ pub trait BatchExecutor: Send {
     ///
     /// This function might return zero rows, which doesn't mean that there is no more result.
     /// See `is_drained` in `BatchExecuteResult`.
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult;
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult;
 
     /// Collects execution statistics (including but not limited to metrics and execution summaries)
     /// accumulated during execution and prepares for next collection.
@@ -71,7 +71,7 @@ impl<T: BatchExecutor + ?Sized> BatchExecutor for Box<T> {
         (**self).schema()
     }
 
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         (**self).next_batch(scan_rows)
     }
 
@@ -97,7 +97,7 @@ impl<C: ExecSummaryCollector + Send, T: BatchExecutor> BatchExecutor
         self.inner.schema()
     }
 
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         let timer = self.summary_collector.on_start_iterate();
         let result = self.inner.next_batch(scan_rows);
         self.summary_collector
@@ -165,4 +165,25 @@ pub struct BatchExecuteResult {
     ///                valid data and should be processed. The caller should NOT call `next_batch()`
     ///                any more.
     pub is_drained: Result<bool>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BatchSize {
+    pub current_size: usize,
+    pub max_size: usize,
+}
+
+impl BatchSize {
+    pub fn new(current_size: usize) -> BatchSize {
+        BatchSize {
+            current_size,
+            max_size: 1024,
+        }
+    }
+}
+
+impl From<usize> for BatchSize {
+    fn from(current_size: usize) -> BatchSize {
+        BatchSize::new(current_size)
+    }
 }

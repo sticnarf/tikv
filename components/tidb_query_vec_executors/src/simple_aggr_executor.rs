@@ -31,7 +31,7 @@ impl<Src: BatchExecutor> BatchExecutor for BatchSimpleAggregationExecutor<Src> {
     }
 
     #[inline]
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         self.0.next_batch(scan_rows)
     }
 
@@ -433,15 +433,15 @@ mod tests {
             BatchSimpleAggregationExecutor::new_for_test(src_exec, aggr_definitions, MyParser);
 
         // The scan rows parameter has no effect for mock executor. We don't care.
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0]);
         assert_eq!(r.physical_columns.rows_len(), 1);
         assert_eq!(r.physical_columns.columns_len(), 12);
@@ -520,15 +520,15 @@ mod tests {
             AllAggrDefinitionParser,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0]);
         assert_eq!(r.physical_columns.rows_len(), 1);
         assert_eq!(r.physical_columns.columns_len(), 10);
@@ -637,11 +637,11 @@ mod tests {
         let mut exec =
             BatchSimpleAggregationExecutor::new_for_test(src_exec, vec![Expr::default()], MyParser);
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0]);
         assert_eq!(r.physical_columns.rows_len(), 1);
         assert_eq!(r.physical_columns.columns_len(), 1);

@@ -44,7 +44,7 @@ lazy_static::lazy_static! {
     pub static ref COPR_BATCH_SIZE: Histogram = register_histogram!(
         "tikv_coprocessor_batch_size",
         "The batch size of coprocessor execution",
-        exponential_buckets(16.0, 2.0, 10).unwrap()
+        exponential_buckets(32.0, 2.0, 10).unwrap()
     )
     .unwrap();
 }

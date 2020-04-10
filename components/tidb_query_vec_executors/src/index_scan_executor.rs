@@ -91,7 +91,7 @@ impl<S: Storage> BatchExecutor for BatchIndexScanExecutor<S> {
     }
 
     #[inline]
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         self.0.next_batch(scan_rows)
     }
 
@@ -387,7 +387,7 @@ mod tests {
             )
             .unwrap();
 
-            let mut result = executor.next_batch(10);
+            let mut result = executor.next_batch(10.into());
             assert!(result.is_drained.as_ref().unwrap());
             assert_eq!(result.physical_columns.columns_len(), 2);
             assert_eq!(result.physical_columns.rows_len(), 3);
@@ -441,7 +441,7 @@ mod tests {
             )
             .unwrap();
 
-            let mut result = executor.next_batch(10);
+            let mut result = executor.next_batch(10.into());
             assert!(result.is_drained.as_ref().unwrap());
             assert_eq!(result.physical_columns.columns_len(), 3);
             assert_eq!(result.physical_columns.rows_len(), 2);
@@ -516,7 +516,7 @@ mod tests {
             )
             .unwrap();
 
-            let mut result = executor.next_batch(10);
+            let mut result = executor.next_batch(10.into());
             assert!(result.is_drained.as_ref().unwrap());
             assert_eq!(result.physical_columns.columns_len(), 3);
             assert_eq!(result.physical_columns.rows_len(), 2);
@@ -571,7 +571,7 @@ mod tests {
             )
             .unwrap();
 
-            let mut result = executor.next_batch(10);
+            let mut result = executor.next_batch(10.into());
             assert!(result.is_drained.as_ref().unwrap());
             assert_eq!(result.physical_columns.columns_len(), 3);
             assert_eq!(result.physical_columns.rows_len(), 1);

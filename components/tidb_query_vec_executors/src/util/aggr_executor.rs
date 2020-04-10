@@ -188,10 +188,14 @@ impl<Src: BatchExecutor, I: AggregationExecutorImpl<Src>> AggregationExecutor<Sr
 
     /// Returns partial results of aggregation if available and whether the source is drained
     #[inline]
-    fn handle_next_batch(&mut self) -> Result<(Option<LazyBatchColumnVec>, bool)> {
+    fn handle_next_batch(
+        &mut self,
+        mut scan_rows: BatchSize,
+    ) -> Result<(Option<LazyBatchColumnVec>, bool)> {
         // Use max batch size from the beginning because aggregation
         // always needs to calculate over all data.
-        let src_result = self.entities.src.next_batch(crate::runner::BATCH_MAX_SIZE);
+        scan_rows.current_size = scan_rows.max_size;
+        let src_result = self.entities.src.next_batch(scan_rows);
 
         self.entities.context.warnings = src_result.warnings;
 
@@ -276,10 +280,10 @@ impl<Src: BatchExecutor, I: AggregationExecutorImpl<Src>> BatchExecutor
     }
 
     #[inline]
-    fn next_batch(&mut self, _scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         assert!(!self.is_ended);
 
-        let result = self.handle_next_batch();
+        let result = self.handle_next_batch(scan_rows);
 
         match result {
             Err(e) => {

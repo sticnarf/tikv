@@ -150,10 +150,10 @@ impl<Src: BatchExecutor> BatchTopNExecutor<Src> {
     }
 
     #[inline]
-    fn handle_next_batch(&mut self) -> Result<Option<LazyBatchColumnVec>> {
+    fn handle_next_batch(&mut self, scan_rows: BatchSize) -> Result<Option<LazyBatchColumnVec>> {
         // Use max batch size from the beginning because top N
         // always needs to calculate over all data.
-        let src_result = self.src.next_batch(crate::runner::BATCH_MAX_SIZE);
+        let src_result = self.src.next_batch(scan_rows);
 
         self.context.warnings = src_result.warnings;
 
@@ -289,7 +289,7 @@ impl<Src: BatchExecutor> BatchExecutor for BatchTopNExecutor<Src> {
     }
 
     #[inline]
-    fn next_batch(&mut self, _scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         assert!(!self.is_ended);
 
         if self.n == 0 {
@@ -302,7 +302,7 @@ impl<Src: BatchExecutor> BatchExecutor for BatchTopNExecutor<Src> {
             };
         }
 
-        let result = self.handle_next_batch();
+        let result = self.handle_next_batch(scan_rows);
 
         match result {
             Err(e) => {
@@ -490,7 +490,7 @@ mod tests {
             0,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(r.is_drained.unwrap());
     }
@@ -526,11 +526,11 @@ mod tests {
             10,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(r.is_drained.unwrap());
     }
@@ -642,17 +642,17 @@ mod tests {
             100,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0, 1, 2, 3, 4, 5, 6]);
         assert_eq!(r.physical_columns.rows_len(), 7);
         assert_eq!(r.physical_columns.columns_len(), 3);
@@ -712,17 +712,17 @@ mod tests {
             7,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0, 1, 2, 3, 4, 5, 6]);
         assert_eq!(r.physical_columns.rows_len(), 7);
         assert_eq!(r.physical_columns.columns_len(), 3);
@@ -793,17 +793,17 @@ mod tests {
             5,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0, 1, 2, 3, 4]);
         assert_eq!(r.physical_columns.rows_len(), 5);
         assert_eq!(r.physical_columns.columns_len(), 3);
@@ -943,17 +943,17 @@ mod tests {
             5,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0, 1, 2, 3, 4]);
         assert_eq!(r.physical_columns.rows_len(), 5);
         assert_eq!(r.physical_columns.columns_len(), 3);
@@ -1024,17 +1024,17 @@ mod tests {
             5,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert_eq!(&r.logical_rows, &[0, 1, 2, 3, 4]);
         assert_eq!(r.physical_columns.rows_len(), 5);
         assert_eq!(r.physical_columns.columns_len(), 3);
@@ -1166,17 +1166,17 @@ mod tests {
                 5,
             );
 
-            let r = exec.next_batch(1);
+            let r = exec.next_batch(1.into());
             assert!(r.logical_rows.is_empty());
             assert_eq!(r.physical_columns.rows_len(), 0);
             assert!(!r.is_drained.unwrap());
 
-            let r = exec.next_batch(1);
+            let r = exec.next_batch(1.into());
             assert!(r.logical_rows.is_empty());
             assert_eq!(r.physical_columns.rows_len(), 0);
             assert!(!r.is_drained.unwrap());
 
-            let r = exec.next_batch(1);
+            let r = exec.next_batch(1.into());
             assert_eq!(&r.logical_rows, &[0, 1, 2, 3, 4]);
             assert_eq!(r.physical_columns.rows_len(), 5);
             assert_eq!(r.physical_columns.columns_len(), 3);

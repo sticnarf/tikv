@@ -41,7 +41,7 @@ impl<Src: BatchExecutor> BatchExecutor for BatchSlowHashAggregationExecutor<Src>
     }
 
     #[inline]
-    fn next_batch(&mut self, scan_rows: usize) -> BatchExecuteResult {
+    fn next_batch(&mut self, scan_rows: BatchSize) -> BatchExecuteResult {
         self.0.next_batch(scan_rows)
     }
 
@@ -548,17 +548,17 @@ mod tests {
             AllAggrDefinitionParser,
         );
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let r = exec.next_batch(1);
+        let r = exec.next_batch(1.into());
         assert!(r.logical_rows.is_empty());
         assert_eq!(r.physical_columns.rows_len(), 0);
         assert!(!r.is_drained.unwrap());
 
-        let mut r = exec.next_batch(1);
+        let mut r = exec.next_batch(1.into());
         // col_4 (sort_key),    col_0 + 1 can result in:
         // NULL,                NULL
         // aa,                  NULL
