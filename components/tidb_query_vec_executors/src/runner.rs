@@ -469,10 +469,16 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
             }
 
             // Grow batch size
-            if batch_len < MAX_TIME_SLICE && batch_size < BATCH_MAX_SIZE {
+            if batch_len < MAX_TIME_SLICE / 3 && batch_size < BATCH_MAX_SIZE {
                 batch_size *= BATCH_GROW_FACTOR;
                 if batch_size > BATCH_MAX_SIZE {
                     batch_size = BATCH_MAX_SIZE
+                }
+            }
+            if batch_len > MAX_TIME_SLICE && batch_size > BATCH_INITIAL_SIZE {
+                batch_size /= 2;
+                if batch_size < BATCH_INITIAL_SIZE {
+                    batch_size = BATCH_INITIAL_SIZE;
                 }
             }
         }
