@@ -47,4 +47,10 @@ lazy_static::lazy_static! {
         exponential_buckets(32.0, 2.0, 10).unwrap()
     )
     .unwrap();
+    pub static ref COPR_BATCH_DURATION: Histogram = register_histogram!(
+        "tikv_coprocessor_batch_duration",
+        "The batch duration of coprocessor execution",
+        exponential_buckets(1e-6, 2.0, 20).unwrap()
+    )
+    .unwrap();
 }

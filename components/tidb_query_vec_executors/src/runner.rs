@@ -465,7 +465,8 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
 
             let now = Instant::now();
             let batch_len = now - batch_start;
-            time_slice_len += now - batch_start;
+            COPR_BATCH_DURATION.observe(batch_len.as_secs_f64());
+            time_slice_len += batch_len;
             // Check whether we should yield from the execution
             if time_slice_len > MAX_TIME_SLICE {
                 reschedule().await;
@@ -476,7 +477,7 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
             }
 
             // Grow batch size
-            if batch_len < MAX_TIME_SLICE / 3 {
+            if batch_len < MAX_TIME_SLICE / 4 {
                 if batch_size.max_size < BATCH_MAX_SIZE {
                     batch_size.max_size = usize::min(BATCH_MAX_SIZE, batch_size.max_size * 2);
                 }
