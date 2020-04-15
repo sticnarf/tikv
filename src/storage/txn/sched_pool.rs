@@ -9,6 +9,7 @@ use tikv_util::collections::HashMap;
 use tikv_util::future_pool::Builder as FuturePoolBuilder;
 use tikv_util::future_pool::FuturePool;
 
+use crate::read_pool::ReadPoolHandle;
 use crate::storage::kv::{destroy_tls_engine, set_tls_engine, Engine, Statistics};
 use crate::storage::metrics::*;
 
@@ -32,27 +33,11 @@ thread_local! {
 
 #[derive(Clone)]
 pub struct SchedPool {
-    pub pool: FuturePool,
+    pub pool: ReadPoolHandle,
 }
 
 impl SchedPool {
-    pub fn new<E: Engine>(engine: E, pool_size: usize, name_prefix: &str) -> Self {
-        let engine = Arc::new(Mutex::new(engine));
-        let pool = FuturePoolBuilder::new()
-            .pool_size(pool_size)
-            .name_prefix(name_prefix)
-            .on_tick(move || tls_flush())
-            // Safety: by setting `after_start` and `before_stop`, `FuturePool` ensures
-            // the tls_engine invariants.
-            .after_start(move || set_tls_engine(engine.lock().unwrap().clone()))
-            .before_stop(move || {
-                // Safety: we ensure the `set_` and `destroy_` calls use the same engine type.
-                unsafe {
-                    destroy_tls_engine::<E>();
-                }
-                tls_flush();
-            })
-            .build();
+    pub fn new(pool: ReadPoolHandle) -> Self {
         SchedPool { pool }
     }
 }

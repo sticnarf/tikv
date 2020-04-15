@@ -39,6 +39,7 @@ use crate::storage::{
     metrics::*,
     txn::{
         commands::{Command, TypedCommand},
+        sched_pool::SchedPool,
         scheduler::Scheduler as TxnScheduler,
     },
     types::StorageCallbackType,
@@ -173,7 +174,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
             engine.clone(),
             lock_mgr,
             config.scheduler_concurrency,
-            config.scheduler_worker_pool_size,
+            SchedPool::new(read_pool.clone()),
             config.scheduler_pending_write_threshold.0 as usize,
             pipelined_pessimistic_lock,
         );

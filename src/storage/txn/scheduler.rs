@@ -170,9 +170,6 @@ struct SchedulerInner<L: LockManager> {
     // worker pool
     worker_pool: SchedPool,
 
-    // high priority commands and system commands will be delivered to this pool
-    high_priority_pool: SchedPool,
-
     // used to control write flow
     running_write_bytes: AtomicUsize,
 
@@ -274,7 +271,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         engine: E,
         lock_mgr: Option<L>,
         concurrency: usize,
-        worker_pool_size: usize,
+        worker_pool: SchedPool,
         sched_pending_write_threshold: usize,
         pipelined_pessimistic_lock: bool,
     ) -> Self {
@@ -292,12 +289,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             latches: Latches::new(concurrency),
             running_write_bytes: AtomicUsize::new(0),
             sched_pending_write_threshold,
-            worker_pool: SchedPool::new(engine.clone(), worker_pool_size, "sched-worker-pool"),
-            high_priority_pool: SchedPool::new(
-                engine.clone(),
-                std::cmp::max(1, worker_pool_size / 2),
-                "sched-high-pri-pool",
-            ),
+            worker_pool,
             lock_mgr,
             pipelined_pessimistic_lock,
         });
@@ -315,12 +307,8 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
 }
 
 impl<E: Engine, L: LockManager> Scheduler<E, L> {
-    fn fetch_executor(&self, priority: CommandPri, is_sys_cmd: bool) -> Executor<E, Self, L> {
-        let pool = if priority == CommandPri::High || is_sys_cmd {
-            self.inner.high_priority_pool.clone()
-        } else {
-            self.inner.worker_pool.clone()
-        };
+    fn fetch_executor(&self) -> Executor<E, Self, L> {
+        let pool = self.inner.worker_pool.clone();
         let scheduler = Scheduler {
             engine: None,
             inner: Arc::clone(&self.inner),
@@ -383,7 +371,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         let task = self.inner.dequeue_task(cid);
         let tag = task.tag;
         let ctx = task.context().clone();
-        let executor = self.fetch_executor(task.priority(), task.cmd().is_sys_cmd());
+        let executor = self.fetch_executor();
 
         let cb = Box::new(move |(cb_ctx, snapshot)| {
             executor.execute(cb_ctx, snapshot, task);
