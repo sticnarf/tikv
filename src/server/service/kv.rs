@@ -831,99 +831,107 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         let storage = self.storage.clone();
         let cop = self.cop.clone();
         let gc_worker = self.gc_worker.clone();
-        if self.enable_req_batch {
-            let stopped = Arc::new(AtomicBool::new(false));
-            let req_batcher = ReqBatcher::new(
-                tx.clone(),
-                self.req_batch_wait_duration,
-                Arc::clone(&self.readpool_normal_thread_load),
-            );
-            let req_batcher = Arc::new(Mutex::new(req_batcher));
-            if let Some(duration) = self.req_batch_wait_duration {
-                let storage = storage.clone();
-                let req_batcher = req_batcher.clone();
-                let req_batcher2 = req_batcher.clone();
-                let stopped = Arc::clone(&stopped);
-                let start = std::time::Instant::now();
-                let timer = GLOBAL_TIMER_HANDLE.clone();
-                self.timer_pool.lock().unwrap().spawn(
-                    timer
-                        .interval(start, duration)
-                        .take_while(move |_| {
-                            // only stop timer when no more incoming and old batch is submitted.
-                            future::ok(
-                                !stopped.load(Ordering::Relaxed)
-                                    || !req_batcher2.lock().unwrap().is_empty(),
-                            )
-                        })
-                        .for_each(move |_| {
-                            req_batcher.lock().unwrap().should_submit(&storage);
-                            Ok(())
-                        })
-                        .map_err(|e| error!("batch_commands timer errored"; "err" => ?e)),
+        // if self.enable_req_batch {
+        //     let stopped = Arc::new(AtomicBool::new(false));
+        //     let req_batcher = ReqBatcher::new(
+        //         tx.clone(),
+        //         self.req_batch_wait_duration,
+        //         Arc::clone(&self.readpool_normal_thread_load),
+        //     );
+        //     let req_batcher = Arc::new(Mutex::new(req_batcher));
+        //     if let Some(duration) = self.req_batch_wait_duration {
+        //         let storage = storage.clone();
+        //         let req_batcher = req_batcher.clone();
+        //         let req_batcher2 = req_batcher.clone();
+        //         let stopped = Arc::clone(&stopped);
+        //         let start = std::time::Instant::now();
+        //         let timer = GLOBAL_TIMER_HANDLE.clone();
+        //         self.timer_pool.lock().unwrap().spawn(
+        //             timer
+        //                 .interval(start, duration)
+        //                 .take_while(move |_| {
+        //                     // only stop timer when no more incoming and old batch is submitted.
+        //                     future::ok(
+        //                         !stopped.load(Ordering::Relaxed)
+        //                             || !req_batcher2.lock().unwrap().is_empty(),
+        //                     )
+        //                 })
+        //                 .for_each(move |_| {
+        //                     req_batcher.lock().unwrap().should_submit(&storage);
+        //                     Ok(())
+        //                 })
+        //                 .map_err(|e| error!("batch_commands timer errored"; "err" => ?e)),
+        //         );
+        //     }
+        //     let request_handler = stream.for_each(move |mut req| {
+        //         let request_ids = req.take_request_ids();
+        //         let requests: Vec<_> = req.take_requests().into();
+        //         GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
+        //         for (id, mut req) in request_ids.into_iter().zip(requests) {
+        //             if !req_batcher.lock().unwrap().filter(id, &mut req) {
+        //                 handle_batch_commands_request(
+        //                     &storage,
+        //                     &gc_worker,
+        //                     &cop,
+        //                     &peer,
+        //                     id,
+        //                     req,
+        //                     tx.clone(),
+        //                 );
+        //             }
+        //         }
+        //         req_batcher.lock().unwrap().maybe_submit(&storage);
+        //         future::ok(())
+        //     });
+        //     ctx.spawn(
+        //         request_handler
+        //             .map_err(|e| error!("batch_commands error"; "err" => %e))
+        //             .and_then(move |_| {
+        //                 // signal timer guard to stop polling
+        //                 stopped.store(true, Ordering::Relaxed);
+        //                 Ok(())
+        //             }),
+        //     );
+        // } else {
+        let request_handler = stream.for_each(move |mut req| {
+            let request_ids = req.take_request_ids();
+            let requests: Vec<_> = req.take_requests().into();
+            GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
+            for (id, req) in request_ids.into_iter().zip(requests) {
+                handle_batch_commands_request(
+                    &storage,
+                    &gc_worker,
+                    &cop,
+                    &peer,
+                    id,
+                    req,
+                    tx.clone(),
                 );
             }
-            let request_handler = stream.for_each(move |mut req| {
-                let request_ids = req.take_request_ids();
-                let requests: Vec<_> = req.take_requests().into();
-                GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
-                for (id, mut req) in request_ids.into_iter().zip(requests) {
-                    if !req_batcher.lock().unwrap().filter(id, &mut req) {
-                        handle_batch_commands_request(
-                            &storage,
-                            &gc_worker,
-                            &cop,
-                            &peer,
-                            id,
-                            req,
-                            tx.clone(),
-                        );
-                    }
-                }
-                req_batcher.lock().unwrap().maybe_submit(&storage);
-                future::ok(())
-            });
-            ctx.spawn(
-                request_handler
-                    .map_err(|e| error!("batch_commands error"; "err" => %e))
-                    .and_then(move |_| {
-                        // signal timer guard to stop polling
-                        stopped.store(true, Ordering::Relaxed);
-                        Ok(())
-                    }),
-            );
-        } else {
-            let request_handler = stream.for_each(move |mut req| {
-                let request_ids = req.take_request_ids();
-                let requests: Vec<_> = req.take_requests().into();
-                GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
-                for (id, req) in request_ids.into_iter().zip(requests) {
-                    handle_batch_commands_request(
-                        &storage,
-                        &gc_worker,
-                        &cop,
-                        &peer,
-                        id,
-                        req,
-                        tx.clone(),
-                    );
-                }
-                future::ok(())
-            });
-            ctx.spawn(request_handler.map_err(|e| error!("batch_commands error"; "err" => %e)));
-        };
+            future::ok(())
+        });
+        ctx.spawn(request_handler.map_err(|e| error!("batch_commands error"; "err" => %e)));
+        // };
 
         let thread_load = Arc::clone(&self.grpc_thread_load);
         let response_retriever = BatchReceiver::new(
             rx,
             GRPC_MSG_MAX_BATCH_SIZE,
-            BatchCommandsResponse::default,
+            || {
+                (
+                    BatchCommandsResponse::default(),
+                    Instant::now() + Duration::from_secs(3600),
+                )
+            },
             BatchRespCollector,
         );
 
         let response_retriever = response_retriever
-            .inspect(|r| GRPC_RESP_BATCH_COMMANDS_SIZE.observe(r.request_ids.len() as f64))
-            .map(move |mut r| {
+            .inspect(|(r, oldest)| {
+                GRPC_RESP_BATCH_COMMANDS_SIZE.observe(r.request_ids.len() as f64);
+                GRPC_RESP_BATCH_RECEIVE_LATENCY.observe((Instant::now() - *oldest).as_secs_f64());
+            })
+            .map(move |(mut r, _)| {
                 r.set_transport_layer_load(thread_load.load() as u64);
                 (r, WriteFlags::default().buffer_hint(false))
             })
@@ -1007,14 +1015,14 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
 fn response_batch_commands_request<F>(
     id: u64,
     resp: F,
-    tx: Sender<(u64, batch_commands_response::Response)>,
+    tx: Sender<(u64, batch_commands_response::Response, Instant)>,
     begin_instant: Instant,
     label_enum: GrpcTypeKind,
 ) where
     F: Future<Item = batch_commands_response::Response, Error = ()> + Send + 'static,
 {
     let f = resp.and_then(move |resp| {
-        if tx.send_and_notify((id, resp)).is_err() {
+        if tx.send_and_notify((id, resp, Instant::now())).is_err() {
             error!("KvService response batch commands fail");
             return Err(());
         }
@@ -1060,7 +1068,7 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
     peer: &str,
     id: u64,
     req: batch_commands_request::Request,
-    tx: Sender<(u64, batch_commands_response::Response)>,
+    tx: Sender<(u64, batch_commands_response::Response, Instant)>,
 ) {
     // To simplify code and make the logic more clear.
     macro_rules! oneof {
@@ -1799,16 +1807,22 @@ pub use kvproto::tikvpb::batch_commands_request;
 pub use kvproto::tikvpb::batch_commands_response;
 
 struct BatchRespCollector;
-impl BatchCollector<BatchCommandsResponse, (u64, batch_commands_response::Response)>
-    for BatchRespCollector
+impl
+    BatchCollector<
+        (BatchCommandsResponse, Instant),
+        (u64, batch_commands_response::Response, Instant),
+    > for BatchRespCollector
 {
     fn collect(
         &mut self,
-        v: &mut BatchCommandsResponse,
-        e: (u64, batch_commands_response::Response),
-    ) -> Option<(u64, batch_commands_response::Response)> {
-        v.mut_request_ids().push(e.0);
-        v.mut_responses().push(e.1);
+        v: &mut (BatchCommandsResponse, Instant),
+        e: (u64, batch_commands_response::Response, Instant),
+    ) -> Option<(u64, batch_commands_response::Response, Instant)> {
+        v.0.mut_request_ids().push(e.0);
+        v.0.mut_responses().push(e.1);
+        if e.2 < v.1 {
+            v.1 = e.2;
+        }
         None
     }
 }
