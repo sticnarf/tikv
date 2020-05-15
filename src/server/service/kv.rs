@@ -838,6 +838,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         let stream = Compat01As03::new(stream);
         let handle_fut = stream
             .try_for_each_concurrent(None, move |mut req| {
+                let start_inst = Instant::now();
                 let request_ids = req.take_request_ids();
                 let requests: Vec<_> = req.take_requests().into();
                 GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
@@ -850,6 +851,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
                             &peer,
                             id,
                             req,
+                            start_inst,
                             tx.clone(),
                         )
                     },
@@ -863,9 +865,10 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         let response_retriever = Compat::new(rx.ready_chunks(128).map(|chunk| {
             let mut batch_resp = BatchCommandsResponse::default();
             let mut oldest = Instant::now() + Duration::from_secs(3600);
-            for (id, resp, inst) in chunk {
+            for (id, resp, inst, inst2) in chunk {
                 batch_resp.mut_request_ids().push(id);
                 batch_resp.mut_responses().push(resp);
+                GRPC_RESP_BATCH_TOTAL_LATENCY.observe((Instant::now() - inst2).as_secs_f64());
                 if inst < oldest {
                     oldest = inst;
                 }
@@ -1104,7 +1107,13 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
     peer: &str,
     id: u64,
     req: batch_commands_request::Request,
-    tx: tokio::sync::mpsc::UnboundedSender<(u64, batch_commands_response::Response, Instant)>,
+    start_inst: Instant,
+    tx: tokio::sync::mpsc::UnboundedSender<(
+        u64,
+        batch_commands_response::Response,
+        Instant,
+        Instant,
+    )>,
 ) -> Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'static>> {
     // To simplify code and make the logic more clear.
     macro_rules! oneof {
@@ -1124,14 +1133,14 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
                     // For some invalid requests.
                     let begin_instant = Instant::now();
                     let resp = future::ok(batch_commands_response::Response::default());
-                    Box::pin(response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::invalid)) as Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'static>>
+                    Box::pin(response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::invalid, start_inst)) as Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'static>>
                 }
                 $(Some(batch_commands_request::request::Cmd::$cmd(req)) => {
                     let begin_instant = Instant::now();
                     let resp = $future_fn($($arg,)* req)
                         .map(oneof!(batch_commands_response::response::Cmd::$cmd))
                         .map_err(|_| GRPC_MSG_FAIL_COUNTER.$metric_name.inc());
-                    Box::pin(response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::$metric_name)) as Pin<Box<dyn std::future::Future<Output = Result<(),()>> + Send + 'static>>
+                    Box::pin(response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::$metric_name, start_inst)) as Pin<Box<dyn std::future::Future<Output = Result<(),()>> + Send + 'static>>
                 })*
                 Some(batch_commands_request::request::Cmd::Import(_)) => unimplemented!(),
             }
@@ -1177,15 +1186,21 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
 async fn response_batch_commands_request<F>(
     id: u64,
     resp: F,
-    tx: tokio::sync::mpsc::UnboundedSender<(u64, batch_commands_response::Response, Instant)>,
+    tx: tokio::sync::mpsc::UnboundedSender<(
+        u64,
+        batch_commands_response::Response,
+        Instant,
+        Instant,
+    )>,
     begin_instant: Instant,
     label_enum: GrpcTypeKind,
+    start_inst: Instant,
 ) -> Result<(), ()>
 where
     F: Future<Item = batch_commands_response::Response, Error = ()> + Send + 'static,
 {
     let resp = Compat01As03::new(resp).await.unwrap();
-    if let Err(e) = tx.send((id, resp, Instant::now())) {
+    if let Err(e) = tx.send((id, resp, Instant::now(), start_inst)) {
         error!("KvService response batch commands fail");
         return Err(());
     }
