@@ -864,22 +864,18 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         let thread_load = Arc::clone(&self.grpc_thread_load);
         let response_retriever = Compat::new(rx.ready_chunks(128).map(|chunk| {
             let mut batch_resp = BatchCommandsResponse::default();
-            let mut oldest = Instant::now() + Duration::from_secs(3600);
             for (id, resp, inst, inst2) in chunk {
                 batch_resp.mut_request_ids().push(id);
                 batch_resp.mut_responses().push(resp);
+                GRPC_RESP_BATCH_RECEIVE_LATENCY.observe((Instant::now() - inst).as_secs_f64());
                 GRPC_RESP_BATCH_TOTAL_LATENCY.observe((Instant::now() - inst2).as_secs_f64());
-                if inst < oldest {
-                    oldest = inst;
-                }
             }
-            Ok::<_, GrpcError>((batch_resp, oldest))
+            Ok::<_, GrpcError>(batch_resp)
         }))
-        .inspect(|(r, oldest)| {
+        .inspect(|r| {
             GRPC_RESP_BATCH_COMMANDS_SIZE.observe(r.request_ids.len() as f64);
-            GRPC_RESP_BATCH_RECEIVE_LATENCY.observe((Instant::now() - *oldest).as_secs_f64());
         })
-        .map(move |(mut r, _)| {
+        .map(move |mut r| {
             r.set_transport_layer_load(thread_load.load() as u64);
             (r, WriteFlags::default().buffer_hint(false))
         });
