@@ -840,6 +840,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
             .try_for_each_concurrent(None, move |mut req| {
                 let request_ids = req.take_request_ids();
                 let requests: Vec<_> = req.take_requests().into();
+                GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
                 futures03::future::join_all(request_ids.into_iter().zip(requests).map(
                     |(id, req)| {
                         handle_batch_commands_request(
