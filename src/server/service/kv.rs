@@ -1111,6 +1111,7 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
         Instant,
     )>,
 ) -> Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'static>> {
+    let begin = Instant::now();
     // To simplify code and make the logic more clear.
     macro_rules! oneof {
         ($p:path) => {
@@ -1143,7 +1144,7 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
         }
     }
 
-    handle_cmd! {
+    let res = handle_cmd! {
         Get, future_get(storage), kv_get;
         Scan, future_scan(storage), kv_scan;
         Prewrite, future_prewrite(storage), kv_prewrite;
@@ -1176,7 +1177,9 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
         PessimisticLock, future_acquire_pessimistic_lock(storage), kv_pessimistic_lock;
         PessimisticRollback, future_pessimistic_rollback(storage), kv_pessimistic_rollback;
         Empty, future_handle_empty(), invalid;
-    }
+    };
+    GRPC_RESP_BATCH_HANDLE_LATENCY.observe(begin.elapsed_secs());
+    res
 }
 
 async fn response_batch_commands_request<F>(
