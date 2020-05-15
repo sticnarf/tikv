@@ -1,5 +1,6 @@
 // Copyright 2017 TiKV Project Authors. Licensed under Apache-2.0.
 
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -25,6 +26,8 @@ use engine_rocks::RocksEngine;
 use futures::executor::{self, Notify, Spawn};
 use futures::future::Either;
 use futures::{future, Async, Future, Sink, Stream};
+use futures03::compat::{Compat, Compat01As03};
+use futures03::prelude::*;
 use grpcio::{
     ClientStreamingSink, DuplexSink, Error as GrpcError, RequestStream, RpcContext, RpcStatus,
     RpcStatusCode, ServerStreamingSink, UnarySink, WriteFlags,
@@ -824,13 +827,94 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         if !check_common_name(self.security_mgr.cert_allowed_cn(), &ctx) {
             return;
         }
-        let (tx, rx) = unbounded(GRPC_MSG_NOTIFY_SIZE);
+        // let (tx, rx) = unbounded(GRPC_MSG_NOTIFY_SIZE);
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         let ctx = Arc::new(ctx);
         let peer = ctx.peer();
         let storage = self.storage.clone();
         let cop = self.cop.clone();
         let gc_worker = self.gc_worker.clone();
+        let stream = Compat01As03::new(stream);
+        let handle_fut = stream
+            .try_for_each_concurrent(None, move |mut req| {
+                let request_ids = req.take_request_ids();
+                let requests: Vec<_> = req.take_requests().into();
+                futures03::future::join_all(request_ids.into_iter().zip(requests).map(
+                    |(id, req)| {
+                        handle_batch_commands_request(
+                            &storage,
+                            &gc_worker,
+                            &cop,
+                            &peer,
+                            id,
+                            req,
+                            tx.clone(),
+                        )
+                    },
+                ))
+                .map(|_| Ok(()))
+            })
+            .map_err(|_| ());
+        ctx.spawn(Compat::new(Box::pin(handle_fut)));
+
+        let thread_load = Arc::clone(&self.grpc_thread_load);
+        let response_retriever = Compat::new(rx.ready_chunks(128).map(|chunk| {
+            let mut batch_resp = BatchCommandsResponse::default();
+            let mut oldest = Instant::now() + Duration::from_secs(3600);
+            for (id, resp, inst) in chunk {
+                batch_resp.mut_request_ids().push(id);
+                batch_resp.mut_responses().push(resp);
+                if inst < oldest {
+                    oldest = inst;
+                }
+            }
+            Ok::<_, GrpcError>((batch_resp, oldest))
+        }))
+        .inspect(|(r, oldest)| {
+            GRPC_RESP_BATCH_COMMANDS_SIZE.observe(r.request_ids.len() as f64);
+            GRPC_RESP_BATCH_RECEIVE_LATENCY.observe((Instant::now() - *oldest).as_secs_f64());
+        })
+        .map(move |(mut r, _)| {
+            r.set_transport_layer_load(thread_load.load() as u64);
+            (r, WriteFlags::default().buffer_hint(false))
+        });
+        ctx.spawn(sink.send_all(response_retriever).map(|_| ()).map_err(|e| {
+            debug!("kv rpc failed";
+                "request" => "batch_commands",
+                "err" => ?e
+            );
+        }));
+        // ctx.spawn(Compat::new(Box::pin(async move {
+        //     loop {
+        //         match stream.next().await {
+        //             Some(Ok(mut req)) => {
+        //                 let request_ids = req.take_request_ids();
+        //                 let requests: Vec<_> = req.take_requests().into();
+        //                 GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
+        //                 for (id, req) in request_ids.into_iter().zip(requests) {
+        //                     handle_batch_commands_request(
+        //                         &storage,
+        //                         &gc_worker,
+        //                         &cop,
+        //                         &peer,
+        //                         &ctx2,
+        //                         id,
+        //                         req,
+        //                         tx.clone(),
+        //                     );
+        //                 }
+        //             }
+        //             Some(Err(e)) => {
+        //                 error!("batch_commands error"; "err" => %e);
+        //                 break;
+        //             }
+        //             None => break,
+        //         }
+        //     }
+        //     Ok(())
+        // })));
+
         // if self.enable_req_batch {
         //     let stopped = Arc::new(AtomicBool::new(false));
         //     let req_batcher = ReqBatcher::new(
@@ -893,59 +977,59 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         //             }),
         //     );
         // } else {
-        let request_handler = stream.for_each(move |mut req| {
-            let request_ids = req.take_request_ids();
-            let requests: Vec<_> = req.take_requests().into();
-            GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
-            for (id, req) in request_ids.into_iter().zip(requests) {
-                handle_batch_commands_request(
-                    &storage,
-                    &gc_worker,
-                    &cop,
-                    &peer,
-                    id,
-                    req,
-                    tx.clone(),
-                );
-            }
-            future::ok(())
-        });
-        ctx.spawn(request_handler.map_err(|e| error!("batch_commands error"; "err" => %e)));
+        // let request_handler = stream.for_each(move |mut req| {
+        //     let request_ids = req.take_request_ids();
+        //     let requests: Vec<_> = req.take_requests().into();
+        //     GRPC_REQ_BATCH_COMMANDS_SIZE.observe(requests.len() as f64);
+        //     for (id, req) in request_ids.into_iter().zip(requests) {
+        //         handle_batch_commands_request(
+        //             &storage,
+        //             &gc_worker,
+        //             &cop,
+        //             &peer,
+        //             id,
+        //             req,
+        //             tx.clone(),
+        //         );
+        //     }
+        //     future::ok(())
+        // });
+        // ctx.spawn(request_handler.map_err(|e| error!("batch_commands error"; "err" => %e)));
         // };
 
-        let thread_load = Arc::clone(&self.grpc_thread_load);
-        let response_retriever = BatchReceiver::new(
-            rx,
-            GRPC_MSG_MAX_BATCH_SIZE,
-            || {
-                (
-                    BatchCommandsResponse::default(),
-                    Instant::now() + Duration::from_secs(3600),
-                )
-            },
-            BatchRespCollector,
-        );
+        // let thread_load = Arc::clone(&self.grpc_thread_load);
+        // let response_retriever = BatchReceiver::new(
+        //     rx,
+        //     GRPC_MSG_MAX_BATCH_SIZE,
+        //     || {
+        //         (
+        //             BatchCommandsResponse::default(),
+        //             Instant::now() + Duration::from_secs(3600),
+        //         )
+        //     },
+        //     BatchRespCollector,
+        // );
 
-        let response_retriever = response_retriever
-            .inspect(|(r, oldest)| {
-                GRPC_RESP_BATCH_COMMANDS_SIZE.observe(r.request_ids.len() as f64);
-                GRPC_RESP_BATCH_RECEIVE_LATENCY.observe((Instant::now() - *oldest).as_secs_f64());
-            })
-            .map(move |(mut r, _)| {
-                r.set_transport_layer_load(thread_load.load() as u64);
-                (r, WriteFlags::default().buffer_hint(false))
-            })
-            .map_err(|e| {
-                let msg = Some(format!("{:?}", e));
-                GrpcError::RpcFailure(RpcStatus::new(RpcStatusCode::UNKNOWN, msg))
-            });
+        // let response_retriever = response_retriever
+        //     .inspect(|(r, oldest)| {
+        //         GRPC_RESP_BATCH_COMMANDS_SIZE.observe(r.request_ids.len() as f64);
+        //         GRPC_RESP_BATCH_RECEIVE_LATENCY.observe((Instant::now() - *oldest).as_secs_f64());
+        //     })
+        //     .map(move |(mut r, _)| {
+        //         r.set_transport_layer_load(thread_load.load() as u64);
+        //         (r, WriteFlags::default().buffer_hint(false))
+        //     })
+        //     .map_err(|e| {
+        //         let msg = Some(format!("{:?}", e));
+        //         GrpcError::RpcFailure(RpcStatus::new(RpcStatusCode::UNKNOWN, msg))
+        //     });
 
-        ctx.spawn(sink.send_all(response_retriever).map(|_| ()).map_err(|e| {
-            debug!("kv rpc failed";
-                "request" => "batch_commands",
-                "err" => ?e
-            );
-        }));
+        // ctx.spawn(sink.send_all(response_retriever).map(|_| ()).map_err(|e| {
+        //     debug!("kv rpc failed";
+        //         "request" => "batch_commands",
+        //         "err" => ?e
+        //     );
+        // }));
     }
 
     fn ver_get(
@@ -1012,55 +1096,6 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
     }
 }
 
-fn response_batch_commands_request<F>(
-    id: u64,
-    resp: F,
-    tx: Sender<(u64, batch_commands_response::Response, Instant)>,
-    begin_instant: Instant,
-    label_enum: GrpcTypeKind,
-) where
-    F: Future<Item = batch_commands_response::Response, Error = ()> + Send + 'static,
-{
-    let f = resp.and_then(move |resp| {
-        if tx.send_and_notify((id, resp, Instant::now())).is_err() {
-            error!("KvService response batch commands fail");
-            return Err(());
-        }
-        GRPC_MSG_HISTOGRAM_STATIC
-            .get(label_enum)
-            .observe(begin_instant.elapsed_secs());
-        Ok(())
-    });
-    poll_future_notify(f);
-}
-
-// BatchCommandsNotify is used to make business pool notifiy completion queues directly.
-struct BatchCommandsNotify<F>(Arc<Mutex<Option<Spawn<F>>>>);
-impl<F> Clone for BatchCommandsNotify<F> {
-    fn clone(&self) -> BatchCommandsNotify<F> {
-        BatchCommandsNotify(Arc::clone(&self.0))
-    }
-}
-impl<F> Notify for BatchCommandsNotify<F>
-where
-    F: Future<Item = (), Error = ()> + Send + 'static,
-{
-    fn notify(&self, id: usize) {
-        let n = Arc::new(self.clone());
-        let mut s = self.0.lock().unwrap();
-        match s.as_mut().map(|spawn| spawn.poll_future_notify(&n, id)) {
-            Some(Ok(Async::NotReady)) | None => {}
-            _ => *s = None,
-        };
-    }
-}
-
-pub fn poll_future_notify<F: Future<Item = (), Error = ()> + Send + 'static>(f: F) {
-    let spawn = Arc::new(Mutex::new(Some(executor::spawn(f))));
-    let notify = BatchCommandsNotify(spawn);
-    notify.notify(0);
-}
-
 fn handle_batch_commands_request<E: Engine, L: LockManager>(
     storage: &Storage<E, L>,
     gc_worker: &GcWorker<E>,
@@ -1068,8 +1103,8 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
     peer: &str,
     id: u64,
     req: batch_commands_request::Request,
-    tx: Sender<(u64, batch_commands_response::Response, Instant)>,
-) {
+    tx: tokio::sync::mpsc::UnboundedSender<(u64, batch_commands_response::Response, Instant)>,
+) -> Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'static>> {
     // To simplify code and make the logic more clear.
     macro_rules! oneof {
         ($p:path) => {
@@ -1088,14 +1123,14 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
                     // For some invalid requests.
                     let begin_instant = Instant::now();
                     let resp = future::ok(batch_commands_response::Response::default());
-                    response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::invalid);
+                    Box::pin(response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::invalid)) as Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send + 'static>>
                 }
                 $(Some(batch_commands_request::request::Cmd::$cmd(req)) => {
                     let begin_instant = Instant::now();
                     let resp = $future_fn($($arg,)* req)
                         .map(oneof!(batch_commands_response::response::Cmd::$cmd))
                         .map_err(|_| GRPC_MSG_FAIL_COUNTER.$metric_name.inc());
-                    response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::$metric_name);
+                    Box::pin(response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::$metric_name)) as Pin<Box<dyn std::future::Future<Output = Result<(),()>> + Send + 'static>>
                 })*
                 Some(batch_commands_request::request::Cmd::Import(_)) => unimplemented!(),
             }
@@ -1137,6 +1172,131 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
         Empty, future_handle_empty(), invalid;
     }
 }
+
+async fn response_batch_commands_request<F>(
+    id: u64,
+    resp: F,
+    tx: tokio::sync::mpsc::UnboundedSender<(u64, batch_commands_response::Response, Instant)>,
+    begin_instant: Instant,
+    label_enum: GrpcTypeKind,
+) -> Result<(), ()>
+where
+    F: Future<Item = batch_commands_response::Response, Error = ()> + Send + 'static,
+{
+    let resp = Compat01As03::new(resp).await.unwrap();
+    if let Err(e) = tx.send((id, resp, Instant::now())) {
+        error!("KvService response batch commands fail");
+        return Err(());
+    }
+    GRPC_MSG_HISTOGRAM_STATIC
+        .get(label_enum)
+        .observe(begin_instant.elapsed_secs());
+    Ok(())
+}
+
+// BatchCommandsNotify is used to make business pool notifiy completion queues directly.
+struct BatchCommandsNotify<F>(Arc<Mutex<Option<Spawn<F>>>>);
+impl<F> Clone for BatchCommandsNotify<F> {
+    fn clone(&self) -> BatchCommandsNotify<F> {
+        BatchCommandsNotify(Arc::clone(&self.0))
+    }
+}
+impl<F> Notify for BatchCommandsNotify<F>
+where
+    F: Future<Item = (), Error = ()> + Send + 'static,
+{
+    fn notify(&self, id: usize) {
+        let n = Arc::new(self.clone());
+        let mut s = self.0.lock().unwrap();
+        match s.as_mut().map(|spawn| spawn.poll_future_notify(&n, id)) {
+            Some(Ok(Async::NotReady)) | None => {}
+            _ => *s = None,
+        };
+    }
+}
+
+pub fn poll_future_notify<F: Future<Item = (), Error = ()> + Send + 'static>(f: F) {
+    let spawn = Arc::new(Mutex::new(Some(executor::spawn(f))));
+    let notify = BatchCommandsNotify(spawn);
+    notify.notify(0);
+}
+
+// fn handle_batch_commands_request<E: Engine, L: LockManager>(
+//     storage: &Storage<E, L>,
+//     gc_worker: &GcWorker<E>,
+//     cop: &Endpoint<E>,
+//     peer: &str,
+//     id: u64,
+//     req: batch_commands_request::Request,
+//     tx: Sender<(u64, batch_commands_response::Response, Instant)>,
+// ) {
+//     // To simplify code and make the logic more clear.
+//     macro_rules! oneof {
+//         ($p:path) => {
+//             |resp| {
+//                 let mut res = batch_commands_response::Response::default();
+//                 res.cmd = Some($p(resp));
+//                 res
+//             }
+//         };
+//     }
+
+//     macro_rules! handle_cmd {
+//         ($($cmd: ident, $future_fn: ident ( $($arg: expr),* ), $metric_name: ident;)*) => {
+//             match req.cmd {
+//                 None => {
+//                     // For some invalid requests.
+//                     let begin_instant = Instant::now();
+//                     let resp = future::ok(batch_commands_response::Response::default());
+//                     response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::invalid);
+//                 }
+//                 $(Some(batch_commands_request::request::Cmd::$cmd(req)) => {
+//                     let begin_instant = Instant::now();
+//                     let resp = $future_fn($($arg,)* req)
+//                         .map(oneof!(batch_commands_response::response::Cmd::$cmd))
+//                         .map_err(|_| GRPC_MSG_FAIL_COUNTER.$metric_name.inc());
+//                     response_batch_commands_request(id, resp, tx, begin_instant, GrpcTypeKind::$metric_name);
+//                 })*
+//                 Some(batch_commands_request::request::Cmd::Import(_)) => unimplemented!(),
+//             }
+//         }
+//     }
+
+//     handle_cmd! {
+//         Get, future_get(storage), kv_get;
+//         Scan, future_scan(storage), kv_scan;
+//         Prewrite, future_prewrite(storage), kv_prewrite;
+//         Commit, future_commit(storage), kv_commit;
+//         Cleanup, future_cleanup(storage), kv_cleanup;
+//         BatchGet, future_batch_get(storage), kv_batch_get;
+//         BatchRollback, future_batch_rollback(storage), kv_batch_rollback;
+//         TxnHeartBeat, future_txn_heart_beat(storage), kv_txn_heart_beat;
+//         CheckTxnStatus, future_check_txn_status(storage), kv_check_txn_status;
+//         ScanLock, future_scan_lock(storage), kv_scan_lock;
+//         ResolveLock, future_resolve_lock(storage), kv_resolve_lock;
+//         Gc, future_gc(gc_worker), kv_gc;
+//         DeleteRange, future_delete_range(storage), kv_delete_range;
+//         RawGet, future_raw_get(storage), raw_get;
+//         RawBatchGet, future_raw_batch_get(storage), raw_batch_get;
+//         RawPut, future_raw_put(storage), raw_put;
+//         RawBatchPut, future_raw_batch_put(storage), raw_batch_put;
+//         RawDelete, future_raw_delete(storage), raw_delete;
+//         RawBatchDelete, future_raw_batch_delete(storage), raw_batch_delete;
+//         RawScan, future_raw_scan(storage), raw_scan;
+//         RawDeleteRange, future_raw_delete_range(storage), raw_delete_range;
+//         RawBatchScan, future_raw_batch_scan(storage), raw_batch_scan;
+//         VerGet, future_ver_get(storage), ver_get;
+//         VerBatchGet, future_ver_batch_get(storage), ver_batch_get;
+//         VerMut, future_ver_mut(storage), ver_mut;
+//         VerBatchMut, future_ver_batch_mut(storage), ver_batch_mut;
+//         VerScan, future_ver_scan(storage), ver_scan;
+//         VerDeleteRange, future_ver_delete_range(storage), ver_delete_range;
+//         Coprocessor, future_cop(cop, Some(peer.to_string())), coprocessor;
+//         PessimisticLock, future_acquire_pessimistic_lock(storage), kv_pessimistic_lock;
+//         PessimisticRollback, future_pessimistic_rollback(storage), kv_pessimistic_rollback;
+//         Empty, future_handle_empty(), invalid;
+//     }
+// }
 
 fn future_handle_empty(
     req: BatchCommandsEmptyRequest,

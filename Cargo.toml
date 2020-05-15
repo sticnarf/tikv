@@ -80,7 +80,7 @@ fail = "0.3"
 failure = "0.1"
 fs2 = "0.4"
 futures = "0.1"
-futures03 = { package = "futures", version = "0.3.1", features = ["compat"] }
+futures03 = { package = "futures", version = "^0.3.5", features = ["compat"] }
 futures-cpupool = "0.1"
 futures-locks = "0.1"
 futures-executor = "0.3.1"
@@ -140,7 +140,7 @@ tikv_alloc = { path = "components/tikv_alloc" }
 tikv_util = { path = "components/tikv_util" }
 time = "0.1"
 tipb = { git = "https://github.com/pingcap/tipb.git", default-features = false }
-tokio = { version = "0.2", features = ["sync"] }
+tokio = { version = "0.2", features = ["sync", "stream"] }
 tokio-tcp = "0.1"
 tokio-core = "0.1"
 tokio-fs = "0.1.6"
