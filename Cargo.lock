@@ -5588,7 +5588,7 @@ checksum = "541b12c998c5b56aa2b4e6f18f03664eef9a4fd0a246a55594efae6cc2d964b5"
 [[package]]
 name = "yatp"
 version = "0.0.1"
-source = "git+https://github.com/sticnarf/yatp.git?branch=bench-spawn-side#63f60c58e9430668f43bea97ba5cac9a3500aa32"
+source = "git+https://github.com/sticnarf/yatp.git?branch=bench-spawn-side#ecb023d4550a7258a4894f6da4529f1b4121f31d"
 dependencies = [
  "crossbeam-deque",
  "dashmap",
