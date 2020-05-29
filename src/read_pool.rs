@@ -147,6 +147,15 @@ impl ReadPoolHandle {
             future::Either::B(rx.map_err(ReadPoolError::from))
         }
     }
+
+    pub fn set_active_thread_count(&self, thread_count: usize) -> bool {
+        if let ReadPoolHandle::Yatp { remote, .. } = self {
+            remote.set_active_thread_count(thread_count);
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[derive(Clone)]

@@ -35,6 +35,7 @@ use std::time::{Duration, Instant};
 
 use super::Result;
 use crate::config::ConfigController;
+use crate::read_pool::ReadPoolHandle;
 use pd_client::RpcClient;
 use security::{self, SecurityConfig};
 use tikv_alloc::error::ProfError;
@@ -90,6 +91,7 @@ pub struct StatusServer<S, R> {
     addr: Option<SocketAddr>,
     pd_client: Option<Arc<RpcClient>>,
     cfg_controller: ConfigController,
+    read_pool: Option<ReadPoolHandle>,
     router: R,
     _snap: PhantomData<S>,
 }
@@ -141,6 +143,7 @@ where
         status_thread_pool_size: usize,
         pd_client: Option<Arc<RpcClient>>,
         cfg_controller: ConfigController,
+        read_pool: Option<ReadPoolHandle>,
         router: R,
     ) -> Result<Self> {
         let thread_pool = Builder::new()
@@ -163,6 +166,7 @@ where
             addr: None,
             pd_client,
             cfg_controller,
+            read_pool,
             router,
             _snap: PhantomData,
         })
@@ -270,6 +274,51 @@ where
                 format!("failed to decode, error: {:?}", e),
             ),
         })
+    }
+
+    async fn update_read_pool_size(
+        read_pool: Option<ReadPoolHandle>,
+        req: Request<Body>,
+    ) -> hyper::Result<Response<Body>> {
+        let query = match req.uri().query() {
+            Some(query) => query,
+            None => {
+                return Ok(StatusServer::err_response(
+                    StatusCode::BAD_REQUEST,
+                    "request should have the query part",
+                ));
+            }
+        };
+        let query_pairs: HashMap<_, _> = url::form_urlencoded::parse(query.as_bytes()).collect();
+        let size: usize = match query_pairs.get("size") {
+            Some(val) => match val.parse() {
+                Ok(val) => val,
+                Err(_) => {
+                    return Ok(StatusServer::err_response(
+                        StatusCode::BAD_REQUEST,
+                        "request should have size argument",
+                    ));
+                }
+            },
+            None => {
+                return Ok(StatusServer::err_response(
+                    StatusCode::BAD_REQUEST,
+                    "request should have size argument",
+                ));
+            }
+        };
+
+        if read_pool
+            .map(|pool| pool.set_active_thread_count(size))
+            .unwrap_or(false)
+        {
+            Ok(Response::default())
+        } else {
+            Ok(StatusServer::err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "fail to set pool size",
+            ))
+        }
     }
 
     pub async fn dump_rsprof(seconds: u64, frequency: i32) -> pprof::Result<pprof::Report> {
@@ -540,15 +589,18 @@ where
     {
         let cfg_controller = self.cfg_controller.clone();
         let router = self.router.clone();
+        let read_pool = self.read_pool.clone();
         // Start to serve.
         let server = builder.serve(make_service_fn(move |_| {
             let cfg_controller = cfg_controller.clone();
             let router = router.clone();
+            let read_pool = read_pool.clone();
             async move {
                 // Create a status service.
                 Ok::<_, hyper::Error>(service_fn(move |req: Request<Body>| {
                     let cfg_controller = cfg_controller.clone();
                     let router = router.clone();
+                    let read_pool = read_pool.clone();
                     async move {
                         let path = req.uri().path().to_owned();
                         let method = req.method().to_owned();
@@ -569,6 +621,9 @@ where
                             (Method::GET, "/config") => Self::get_config(&cfg_controller).await,
                             (Method::POST, "/config") => {
                                 Self::update_config(cfg_controller.clone(), req).await
+                            }
+                            (Method::GET, "/config/pool") => {
+                                Self::update_read_pool_size(read_pool.clone(), req).await
                             }
                             (Method::GET, "/debug/pprof/profile") => {
                                 Self::dump_rsperf_to_resp(req).await
@@ -832,7 +887,7 @@ mod tests {
     #[test]
     fn test_status_service() {
         let mut status_server =
-            StatusServer::new(1, None, ConfigController::default(), MockRouter).unwrap();
+            StatusServer::new(1, None, ConfigController::default(), None, MockRouter).unwrap();
         let _ = status_server.start("127.0.0.1:0".to_string(), &SecurityConfig::default());
         let client = Client::new();
         let uri = Uri::builder()
@@ -872,7 +927,7 @@ mod tests {
     #[test]
     fn test_config_endpoint() {
         let mut status_server =
-            StatusServer::new(1, None, ConfigController::default(), MockRouter).unwrap();
+            StatusServer::new(1, None, ConfigController::default(), None, MockRouter).unwrap();
         let _ = status_server.start("127.0.0.1:0".to_string(), &SecurityConfig::default());
         let client = Client::new();
         let uri = Uri::builder()
@@ -909,7 +964,7 @@ mod tests {
     fn test_status_service_fail_endpoints() {
         let _guard = fail::FailScenario::setup();
         let mut status_server =
-            StatusServer::new(1, None, ConfigController::default(), MockRouter).unwrap();
+            StatusServer::new(1, None, ConfigController::default(), None, MockRouter).unwrap();
         let _ = status_server.start("127.0.0.1:0".to_string(), &SecurityConfig::default());
         let client = Client::new();
         let addr = status_server.listening_addr().to_string();
@@ -1017,7 +1072,7 @@ mod tests {
     fn test_status_service_fail_endpoints_can_trigger_fails() {
         let _guard = fail::FailScenario::setup();
         let mut status_server =
-            StatusServer::new(1, None, ConfigController::default(), MockRouter).unwrap();
+            StatusServer::new(1, None, ConfigController::default(), None, MockRouter).unwrap();
         let _ = status_server.start("127.0.0.1:0".to_string(), &SecurityConfig::default());
         let client = Client::new();
         let addr = status_server.listening_addr().to_string();
@@ -1109,7 +1164,7 @@ mod tests {
 
     fn do_test_security_status_service(allowed_cn: HashSet<String>, expected: bool) {
         let mut status_server =
-            StatusServer::new(1, None, ConfigController::default(), MockRouter).unwrap();
+            StatusServer::new(1, None, ConfigController::default(), None, MockRouter).unwrap();
         let _ = status_server.start(
             "127.0.0.1:0".to_string(),
             &new_security_cfg(Some(allowed_cn)),
@@ -1199,7 +1254,7 @@ mod tests {
     #[test]
     fn test_pprof_profile_service() {
         let mut status_server =
-            StatusServer::new(1, None, ConfigController::default(), MockRouter).unwrap();
+            StatusServer::new(1, None, ConfigController::default(), None, MockRouter).unwrap();
         let _ = status_server.start("127.0.0.1:0".to_string(), &SecurityConfig::default());
         let client = Client::new();
         let uri = Uri::builder()

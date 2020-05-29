@@ -45,7 +45,7 @@ use tikv::{
     config::{ConfigController, DBConfigManger, DBType, TiKvConfig},
     coprocessor,
     import::{ImportSSTService, SSTImporter},
-    read_pool::{build_yatp_read_pool, ReadPool},
+    read_pool::{build_yatp_read_pool, ReadPool, ReadPoolHandle},
     server::{
         config::Config as ServerConfig,
         create_raft_storage,
@@ -125,6 +125,7 @@ struct TiKVServer {
     coprocessor_host: Option<CoprocessorHost<RocksEngine>>,
     to_stop: Vec<Box<dyn Stop>>,
     lock_files: Vec<File>,
+    read_pool_handle: Option<ReadPoolHandle>,
 }
 
 struct Engines {
@@ -187,6 +188,7 @@ impl TiKVServer {
             coprocessor_host,
             to_stop: vec![Box::new(resolve_worker)],
             lock_files: vec![],
+            read_pool_handle: None,
         }
     }
 
@@ -772,6 +774,7 @@ impl TiKVServer {
                 self.config.server.status_thread_pool_size,
                 Some(self.pd_client.clone()),
                 self.cfg_controller.take().unwrap(),
+                self.read_pool_handle.clone(),
                 self.router.clone(),
             ) {
                 Ok(status_server) => Box::new(status_server),
