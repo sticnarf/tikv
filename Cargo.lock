@@ -109,6 +109,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-mutex"
+version = "1.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20e85981fc34e84cdff3fc2c9219189752633fdc538a06df8b5ac45b68a4f3a9"
+dependencies = [
+ "event-listener",
+]
+
+[[package]]
 name = "async-speed-limit"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -143,9 +152,9 @@ dependencies = [
 
 [[package]]
 name = "async-trait"
-version = "0.1.22"
+version = "0.1.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8df72488e87761e772f14ae0c2480396810e51b2c2ade912f97f0f7e5b95e3c"
+checksum = "a265e3abeffdce30b2e26b7a11b222fe37c6067404001b434101457d0385eb92"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -628,6 +637,17 @@ dependencies = [
  "rand",
  "static_assertions",
  "tikv_alloc",
+]
+
+[[package]]
+name = "concurrency_manager"
+version = "0.0.1"
+dependencies = [
+ "async-mutex",
+ "async-trait",
+ "kvproto",
+ "thiserror",
+ "txn_types",
 ]
 
 [[package]]
@@ -1131,6 +1151,12 @@ dependencies = [
  "backtrace",
  "version_check 0.1.5",
 ]
+
+[[package]]
+name = "event-listener"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "05b148ad9bf80edb24098fd1ab4883c7c381e7900c1a38e512fb0586c4501505"
 
 [[package]]
 name = "external_storage"

@@ -42,6 +42,7 @@ impl Latch {
         }
         None
     }
+    
 
     /// Remove the first command ID in the queue whose hash value is equal to hash_key.
     /// If the element which would be removed does not appear at the front of the queue, it will leave

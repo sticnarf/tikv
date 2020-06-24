@@ -202,6 +202,7 @@ members = [
   "components/match_template",
   "components/engine_traits/tests",
   "components/codec",
+  "components/concurrency_manager",
   "components/configuration",
   "components/panic_hook",
   "components/tipb_helper",
