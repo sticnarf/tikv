@@ -400,6 +400,8 @@ impl<S: Snapshot> MvccTxn<S> {
         txn_size: u64,
         mut min_commit_ts: TimeStamp,
         pipelined_pessimistic_lock: bool,
+        use_parallel_commit: bool,
+        secondaries: Vec<Vec<u8>>,
     ) -> Result<()> {
         if mutation.should_not_write() {
             return Err(box_err!(
@@ -526,6 +528,8 @@ impl<S: Snapshot> MvccTxn<S> {
         lock_ttl: u64,
         txn_size: u64,
         min_commit_ts: TimeStamp,
+        use_parallel_commit: bool,
+        secondaries: Vec<Vec<u8>>,
     ) -> Result<()> {
         let lock_type = LockType::from_mutation(&mutation);
         // For the insert/checkNotExists operation, the old key should not be in the system.
@@ -1740,6 +1744,8 @@ mod tests {
             0,
             0,
             TimeStamp::default(),
+            false,
+            Vec::new(),
         )
         .unwrap();
         assert!(txn.write_size() > 0);
@@ -1778,7 +1784,9 @@ mod tests {
                 false,
                 0,
                 0,
-                TimeStamp::default()
+                TimeStamp::default(),
+                false,
+                Vec::new(),
             )
             .is_err());
 
@@ -1792,7 +1800,9 @@ mod tests {
                 true,
                 0,
                 0,
-                TimeStamp::default()
+                TimeStamp::default(),
+                false,
+                Vec::new()
             )
             .is_ok());
     }

@@ -625,6 +625,8 @@ mod tests {
                         0,
                         0,
                         TimeStamp::default(),
+                        false,
+                        Vec::new(),
                     )
                     .unwrap();
                 }

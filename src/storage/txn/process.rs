@@ -540,6 +540,8 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
             mut skip_constraint_check,
             txn_size,
             min_commit_ts,
+            use_parallel_commit,
+            mut secondaries,
         }) => {
             let mut scan_mode = None;
             let rows = mutations.len();
@@ -573,7 +575,15 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
             };
 
             let mut locks = vec![];
+            let encoded_primary = Key::from_raw(&primary);
             for m in mutations {
+                let write_secondaries =
+                    use_parallel_commit && !secondaries.is_empty() && &encoded_primary == m.key();
+                let taken_secondaries = if write_secondaries {
+                    mem::replace(&mut secondaries, Vec::new())
+                } else {
+                    Vec::new()
+                };
                 match txn.prewrite(
                     m,
                     &primary,
@@ -581,6 +591,8 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
                     lock_ttl,
                     txn_size,
                     min_commit_ts,
+                    use_parallel_commit,
+                    taken_secondaries,
                 ) {
                     Ok(_) => {}
                     e @ Err(MvccError(box MvccErrorInner::KeyIsLocked { .. })) => {
@@ -609,12 +621,22 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
             for_update_ts,
             txn_size,
             min_commit_ts,
+            use_parallel_commit,
+            mut secondaries,
         }) => {
             let rows = mutations.len();
             let mut txn = MvccTxn::new(snapshot, start_ts, !cmd.ctx.get_not_fill_cache());
 
             let mut locks = vec![];
+            let encoded_primary = Key::from_raw(&primary);
             for (m, is_pessimistic_lock) in mutations.into_iter() {
+                let write_secondaries =
+                    use_parallel_commit && !secondaries.is_empty() && &encoded_primary == m.key();
+                let taken_secondaries = if write_secondaries {
+                    mem::replace(&mut secondaries, Vec::new())
+                } else {
+                    Vec::new()
+                };
                 match txn.pessimistic_prewrite(
                     m,
                     &primary,
@@ -624,6 +646,8 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
                     txn_size,
                     min_commit_ts,
                     pipelined_pessimistic_lock,
+                    use_parallel_commit,
+                    taken_secondaries,
                 ) {
                     Ok(_) => {}
                     e @ Err(MvccError(box MvccErrorInner::KeyIsLocked { .. })) => {

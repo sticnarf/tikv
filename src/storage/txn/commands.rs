@@ -59,6 +59,8 @@ impl From<PrewriteRequest> for TypedCommand<Vec<Result<()>>> {
                 req.get_skip_constraint_check(),
                 req.get_txn_size(),
                 req.get_min_commit_ts().into(),
+                req.get_use_parallel_commit(),
+                req.take_secondaries().into(),
                 req.take_context(),
             )
         } else {
@@ -77,6 +79,8 @@ impl From<PrewriteRequest> for TypedCommand<Vec<Result<()>>> {
                 for_update_ts.into(),
                 req.get_txn_size(),
                 req.get_min_commit_ts().into(),
+                req.get_use_parallel_commit(),
+                req.take_secondaries().into(),
                 req.take_context(),
             )
         }
@@ -318,6 +322,8 @@ command! {
             /// How many keys this transaction involved.
             txn_size: u64,
             min_commit_ts: TimeStamp,
+            use_parallel_commit: bool,
+            secondaries: Vec<Vec<u8>>,
         }
 }
 
@@ -336,6 +342,8 @@ impl Prewrite {
             false,
             0,
             TimeStamp::default(),
+            false,
+            Vec::new(),
             Context::default(),
         )
     }
@@ -355,6 +363,8 @@ impl Prewrite {
             false,
             0,
             TimeStamp::default(),
+            false,
+            Vec::new(),
             Context::default(),
         )
     }
@@ -373,6 +383,8 @@ impl Prewrite {
             false,
             0,
             TimeStamp::default(),
+            false,
+            Vec::new(),
             ctx,
         )
     }
@@ -399,6 +411,8 @@ command! {
             /// How many keys this transaction involved.
             txn_size: u64,
             min_commit_ts: TimeStamp,
+            use_parallel_commit: bool,
+            secondaries: Vec<Vec<u8>>,
         }
 }
 
