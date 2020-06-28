@@ -479,6 +479,7 @@ impl TiKVServer {
             &self.config.storage,
             storage_read_pool_handle,
             concurrency_manager,
+            Some(self.pd_client.clone()),
             lock_mgr.clone(),
             self.config.pessimistic_txn.pipelined,
         )

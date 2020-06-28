@@ -18,7 +18,7 @@ use engine_traits::Peekable;
 use kvproto::metapb;
 use kvproto::raft_serverpb::StoreIdent;
 use kvproto::replication_modepb::ReplicationStatus;
-use pd_client::{Error as PdError, PdClient, INVALID_ID};
+use pd_client::{Error as PdError, PdClient, RpcClient as PdRpcClient, INVALID_ID};
 use raftstore::coprocessor::dispatcher::CoprocessorHost;
 use raftstore::router::RaftStoreRouter;
 use raftstore::store::fsm::store::StoreMeta;
@@ -40,6 +40,7 @@ pub fn create_raft_storage<S>(
     cfg: &StorageConfig,
     read_pool: ReadPoolHandle,
     concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+    pd_client: Option<Arc<PdRpcClient>>,
     lock_mgr: Option<LockManager>,
     pipelined_pessimistic_lock: bool,
 ) -> Result<Storage<RaftKv<S>, LockManager>>
@@ -51,6 +52,7 @@ where
         cfg,
         read_pool,
         concurrency_manager,
+        pd_client,
         lock_mgr,
         pipelined_pessimistic_lock,
     )?;

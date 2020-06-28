@@ -28,6 +28,7 @@ use std::u64;
 
 use concurrency_manager::MutexBTreeConcurrencyManager;
 use kvproto::kvrpcpb::CommandPri;
+use pd_client::RpcClient as PdRpcClient;
 use tikv_util::{callback::must_call, collections::HashMap, time::Instant};
 use txn_types::TimeStamp;
 
@@ -199,6 +200,13 @@ struct SchedulerInner<L: LockManager> {
 
     concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
 
+    // A PD client used to get timestamps from TSO.
+    // A concrete type (RpcClient) is used instead of using generics because it is only
+    // a workaround for https://github.com/tikv/sig-transaction/issues/21 and we don't
+    // want to make the code too complex. This will be removed after we don't need to
+    // get timestamps from PD.
+    pd_client: Option<Arc<PdRpcClient>>,
+
     pipelined_pessimistic_lock: bool,
 }
 
@@ -295,6 +303,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         engine: E,
         lock_mgr: Option<L>,
         concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+        pd_client: Option<Arc<PdRpcClient>>,
         concurrency: usize,
         worker_pool_size: usize,
         sched_pending_write_threshold: usize,
@@ -322,6 +331,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             ),
             lock_mgr,
             concurrency_manager,
+            pd_client,
             pipelined_pessimistic_lock,
         });
 
@@ -353,6 +363,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             pool,
             self.inner.lock_mgr.clone(),
             self.inner.concurrency_manager.clone(),
+            self.inner.pd_client.clone(),
             self.inner.pipelined_pessimistic_lock,
         )
     }

@@ -50,6 +50,7 @@ use engine_traits::{IterOptions, DATA_KEY_PREFIX_LEN};
 use futures::Future;
 use futures03::prelude::*;
 use kvproto::kvrpcpb::{CommandPri, Context, GetRequest, KeyRange, RawGetRequest};
+use pd_client::RpcClient as PdRpcClient;
 use raftstore::store::util::build_key_range;
 use rand::prelude::*;
 use std::sync::{atomic, Arc};
@@ -161,6 +162,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
         config: &Config,
         read_pool: ReadPoolHandle,
         concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+        pd_client: Option<Arc<PdRpcClient>>,
         lock_mgr: Option<L>,
         pipelined_pessimistic_lock: bool,
     ) -> Result<Self> {
@@ -169,6 +171,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
             engine.clone(),
             lock_mgr,
             concurrency_manager.clone(),
+            pd_client,
             config.scheduler_concurrency,
             config.scheduler_worker_pool_size,
             config.scheduler_pending_write_threshold.0 as usize,
@@ -1370,6 +1373,7 @@ impl<E: Engine, L: LockManager> TestStorageBuilder<E, L> {
             &self.config,
             ReadPool::from(read_pool).handle(),
             Arc::new(MutexBTreeConcurrencyManager::new(1.into())),
+            None,
             self.lock_mgr,
             self.pipelined_pessimistic_lock,
         )

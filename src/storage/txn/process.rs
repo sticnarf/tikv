@@ -8,6 +8,7 @@ use std::{mem, thread, u64};
 use concurrency_manager::MutexBTreeConcurrencyManager;
 use futures::future;
 use kvproto::kvrpcpb::{CommandPri, Context, LockInfo};
+use pd_client::RpcClient as PdRpcClient;
 use txn_types::{Key, Value};
 
 use crate::storage::kv::{
@@ -93,6 +94,8 @@ pub struct Executor<E: Engine, S: MsgScheduler, L: LockManager> {
 
     concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
 
+    pd_client: Option<Arc<PdRpcClient>>,
+
     pipelined_pessimistic_lock: bool,
 
     _phantom: PhantomData<E>,
@@ -104,6 +107,7 @@ impl<E: Engine, S: MsgScheduler, L: LockManager> Executor<E, S, L> {
         pool: SchedPool,
         lock_mgr: Option<L>,
         concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+        pd_client: Option<Arc<PdRpcClient>>,
         pipelined_pessimistic_lock: bool,
     ) -> Self {
         Executor {
@@ -111,6 +115,7 @@ impl<E: Engine, S: MsgScheduler, L: LockManager> Executor<E, S, L> {
             scheduler: Some(scheduler),
             lock_mgr,
             concurrency_manager,
+            pd_client,
             pipelined_pessimistic_lock,
             _phantom: Default::default(),
         }
@@ -242,6 +247,7 @@ impl<E: Engine, S: MsgScheduler, L: LockManager> Executor<E, S, L> {
             snapshot,
             lock_mgr,
             self.concurrency_manager.clone(),
+            self.pd_client.clone(),
             &mut statistics,
             self.pipelined_pessimistic_lock,
         ) {
@@ -536,6 +542,7 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
     snapshot: S,
     lock_mgr: Option<L>,
     concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+    pd_client: Option<Arc<PdRpcClient>>,
     statistics: &mut Statistics,
     pipelined_pessimistic_lock: bool,
 ) -> Result<WriteResult> {
@@ -1015,8 +1022,10 @@ mod tests {
         }
         let mut statistic = Statistics::default();
         let engine = TestEngineBuilder::new().build().unwrap();
+        let concurrency_manager = Arc::new(MutexBTreeConcurrencyManager::new(1.into()));
         prewrite(
             &engine,
+            concurrency_manager.clone(),
             &mut statistic,
             vec![Mutation::Put((
                 Key::from_raw(&[pri_key_number]),
@@ -1029,6 +1038,7 @@ mod tests {
         assert_eq!(1, statistic.write.seek);
         let e = prewrite(
             &engine,
+            concurrency_manager.clone(),
             &mut statistic,
             mutations.clone(),
             pri_key.to_vec(),
@@ -1043,6 +1053,7 @@ mod tests {
         }
         commit(
             &engine,
+            concurrency_manager.clone(),
             &mut statistic,
             vec![Key::from_raw(&[pri_key_number])],
             99,
@@ -1052,6 +1063,7 @@ mod tests {
         assert_eq!(2, statistic.write.seek);
         let e = prewrite(
             &engine,
+            concurrency_manager.clone(),
             &mut statistic,
             mutations.clone(),
             pri_key.to_vec(),
@@ -1067,6 +1079,7 @@ mod tests {
         }
         let e = prewrite(
             &engine,
+            concurrency_manager.clone(),
             &mut statistic,
             mutations.clone(),
             pri_key.to_vec(),
@@ -1090,6 +1103,7 @@ mod tests {
             .unwrap();
         prewrite(
             &engine,
+            concurrency_manager.clone(),
             &mut statistic,
             mutations.clone(),
             pri_key.to_vec(),
@@ -1099,7 +1113,15 @@ mod tests {
         // All keys are prewrited successful with only one seek operations.
         assert_eq!(1, statistic.write.seek);
         let keys: Vec<Key> = mutations.iter().map(|m| m.key().clone()).collect();
-        commit(&engine, &mut statistic, keys.clone(), 104, 105).unwrap();
+        commit(
+            &engine,
+            concurrency_manager.clone(),
+            &mut statistic,
+            keys.clone(),
+            104,
+            105,
+        )
+        .unwrap();
         let snap = engine.snapshot(&ctx).unwrap();
         for k in keys {
             let v = snap.get_cf(CF_WRITE, &k.append_ts(105.into())).unwrap();
@@ -1119,6 +1141,7 @@ mod tests {
 
     fn prewrite<E: Engine>(
         engine: &E,
+        concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
         statistics: &mut Statistics,
         mutations: Vec<Mutation>,
         primary: Vec<u8>,
@@ -1128,7 +1151,15 @@ mod tests {
         let snap = engine.snapshot(&ctx)?;
         let cmd = Prewrite::with_defaults(mutations, primary, TimeStamp::from(start_ts)).into();
         let m = DummyLockManager {};
-        let ret = process_write_impl(cmd, snap, Some(m), statistics, false)?;
+        let ret = process_write_impl(
+            cmd,
+            snap,
+            Some(m),
+            concurrency_manager,
+            None,
+            statistics,
+            false,
+        )?;
         if let ProcessResult::MultiRes { results } = ret.pr {
             if !results.is_empty() {
                 let info = LockInfo::default();
@@ -1144,6 +1175,7 @@ mod tests {
 
     fn commit<E: Engine>(
         engine: &E,
+        concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
         statistics: &mut Statistics,
         keys: Vec<Key>,
         lock_ts: u64,
@@ -1158,7 +1190,15 @@ mod tests {
             ctx,
         );
         let m = DummyLockManager {};
-        let ret = process_write_impl(cmd.into(), snap, Some(m), statistics, false)?;
+        let ret = process_write_impl(
+            cmd.into(),
+            snap,
+            Some(m),
+            concurrency_manager,
+            None,
+            statistics,
+            false,
+        )?;
         let ctx = Context::default();
         engine.write(&ctx, ret.to_be_write).unwrap();
         Ok(())

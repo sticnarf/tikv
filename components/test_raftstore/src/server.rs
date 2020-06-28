@@ -191,6 +191,7 @@ impl Simulator for ServerCluster {
             &cfg.storage,
             storage_read_pool.handle(),
             concurrency_manager,
+            None,
             Some(lock_mgr.clone()),
             false,
         )?;
