@@ -7,6 +7,7 @@ use std::{mem, thread, u64};
 
 use concurrency_manager::MutexBTreeConcurrencyManager;
 use futures::future;
+use futures03::executor::block_on;
 use kvproto::kvrpcpb::{CommandPri, Context, LockInfo};
 use pd_client::RpcClient as PdRpcClient;
 use txn_types::{Key, Value};
@@ -588,6 +589,22 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
             } else {
                 MvccTxn::new(snapshot, start_ts, !cmd.ctx.get_not_fill_cache())
             };
+
+            // Note: Converting keys back to raw format is a temporary solution. We needn't do it
+            // after replacing the latch with the concurrency manager.
+            let raw_keys: Vec<_> = mutations
+                .iter()
+                .map(|m| m.key().to_raw().unwrap())
+                .collect();
+
+            // Note: Currently we are still using the latch. This means `lock_key` will
+            // always succeeds immediately. So we just block_on here.
+            let guards: Vec<_> = raw_keys
+                .iter()
+                .map(|key| block_on(concurrency_manager.lock_key(key)))
+                .collect();
+
+            let max_read_ts = concurrency_manager.max_read_ts();
 
             let mut locks = vec![];
             let encoded_primary = Key::from_raw(&primary);

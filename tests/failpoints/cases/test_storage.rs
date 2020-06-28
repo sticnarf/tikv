@@ -45,6 +45,8 @@ fn test_scheduler_leader_change_twice() {
                 false,
                 0,
                 TimeStamp::default(),
+                false,
+                Vec::new(),
                 ctx0,
             ),
             Box::new(move |res: storage::Result<_>| {
@@ -237,6 +239,8 @@ fn test_pipelined_pessimistic_lock() {
                 10.into(),
                 1,
                 11.into(),
+                false,
+                Vec::new(),
                 Context::default(),
             ),
             expect_ok_callback(tx.clone(), 0),

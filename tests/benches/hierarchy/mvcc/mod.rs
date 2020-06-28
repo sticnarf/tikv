@@ -36,6 +36,8 @@ where
             0,
             0,
             TimeStamp::default(),
+            false,
+            Vec::new(),
         )
         .unwrap();
     }
@@ -66,8 +68,17 @@ fn mvcc_prewrite<E: Engine, F: EngineFactory<E>>(b: &mut Bencher, config: &Bench
         |(mutations, snapshot)| {
             for (mutation, primary) in mutations {
                 let mut txn = mvcc::new_txn!(snapshot.clone(), 1, true);
-                txn.prewrite(mutation, &primary, false, 0, 0, TimeStamp::default())
-                    .unwrap();
+                txn.prewrite(
+                    mutation,
+                    &primary,
+                    false,
+                    0,
+                    0,
+                    TimeStamp::default(),
+                    false,
+                    Vec::new(),
+                )
+                .unwrap();
             }
         },
         BatchSize::SmallInput,
