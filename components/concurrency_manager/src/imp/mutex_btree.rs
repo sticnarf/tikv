@@ -19,6 +19,11 @@ impl<'a> RangeBounds<[u8]> for StartRange<'a> {
 }
 
 impl ConcurrentMap for Mutex<BTreeMap<Vec<u8>, KeyLock>> {
+    fn get(&self, key: &[u8]) -> Option<KeyLock> {
+        let map = self.lock().unwrap();
+        map.get(key).cloned()
+    }
+
     fn lower_bound(&self, key: &[u8]) -> Option<(Vec<u8>, KeyLock)> {
         let map = self.lock().unwrap();
         map.range(StartRange(key))

@@ -14,7 +14,20 @@ pub trait ConcurrencyManager<'a>: Send + Sync {
 
     fn max_read_ts(&'a self) -> TimeStamp;
 
-    fn read_check(&'a self, start_key: &[u8], end_key: &[u8], ts: TimeStamp) -> Result<()>;
+    fn read_key_check(
+        &'a self,
+        key: &[u8],
+        ts: TimeStamp,
+        check_fn: impl FnMut(&LockInfo, TimeStamp) -> bool,
+    ) -> Result<()>;
+
+    fn read_range_check(
+        &'a self,
+        start_key: &[u8],
+        end_key: &[u8],
+        ts: TimeStamp,
+        check_fn: impl FnMut(&LockInfo, TimeStamp) -> bool,
+    ) -> Result<()>;
 
     async fn lock_key(&'a self, key: &'a [u8]) -> Self::LockGuard;
 }

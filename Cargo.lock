@@ -647,6 +647,7 @@ dependencies = [
  "async-trait",
  "kvproto",
  "thiserror",
+ "tokio 0.2.13",
  "txn_types",
 ]
 
