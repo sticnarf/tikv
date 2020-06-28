@@ -9,10 +9,12 @@
 //! We keep these components in the `TiKVServer` struct.
 
 use crate::{setup::*, signal_handler};
+use concurrency_manager::MutexBTreeConcurrencyManager;
 use encryption::DataKeyManager;
 use engine_rocks::{encryption::get_env, Compat, RocksEngine, RocksSnapshot};
 use engine_traits::{KvEngines, MetricsFlusher};
 use fs2::FileExt;
+use futures::future::Future;
 use futures_cpupool::Builder;
 use kvproto::{
     backup::create_backup, cdcpb::create_change_data, deadlock::create_deadlock,
@@ -444,6 +446,13 @@ impl TiKVServer {
         let pd_worker = FutureWorker::new("pd-worker");
         let pd_sender = pd_worker.scheduler();
 
+        let latest_ts = self
+            .pd_client
+            .get_tso()
+            .wait()
+            .unwrap_or_else(|e| fatal!("failed to get a latest TS from PD: {}", e));
+        let concurrency_manager = Arc::new(MutexBTreeConcurrencyManager::new(latest_ts));
+
         let unified_read_pool = if self.config.readpool.is_unified_pool_enabled() {
             Some(build_yatp_read_pool(
                 &self.config.readpool.unified,
@@ -469,6 +478,7 @@ impl TiKVServer {
             engines.engine.clone(),
             &self.config.storage,
             storage_read_pool_handle,
+            concurrency_manager,
             lock_mgr.clone(),
             self.config.pessimistic_txn.pipelined,
         )

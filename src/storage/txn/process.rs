@@ -1,9 +1,11 @@
 // Copyright 2018 TiKV Project Authors. Licensed under Apache-2.0.
 
 use std::marker::PhantomData;
+use std::sync::Arc;
 use std::time::Duration;
 use std::{mem, thread, u64};
 
+use concurrency_manager::MutexBTreeConcurrencyManager;
 use futures::future;
 use kvproto::kvrpcpb::{CommandPri, Context, LockInfo};
 use txn_types::{Key, Value};
@@ -89,6 +91,8 @@ pub struct Executor<E: Engine, S: MsgScheduler, L: LockManager> {
     // If the task releases some locks, we wake up waiters waiting for them.
     lock_mgr: Option<L>,
 
+    concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+
     pipelined_pessimistic_lock: bool,
 
     _phantom: PhantomData<E>,
@@ -99,12 +103,14 @@ impl<E: Engine, S: MsgScheduler, L: LockManager> Executor<E, S, L> {
         scheduler: S,
         pool: SchedPool,
         lock_mgr: Option<L>,
+        concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
         pipelined_pessimistic_lock: bool,
     ) -> Self {
         Executor {
             sched_pool: Some(pool),
             scheduler: Some(scheduler),
             lock_mgr,
+            concurrency_manager,
             pipelined_pessimistic_lock,
             _phantom: Default::default(),
         }
@@ -235,6 +241,7 @@ impl<E: Engine, S: MsgScheduler, L: LockManager> Executor<E, S, L> {
             task.cmd,
             snapshot,
             lock_mgr,
+            self.concurrency_manager.clone(),
             &mut statistics,
             self.pipelined_pessimistic_lock,
         ) {
@@ -528,6 +535,7 @@ fn process_write_impl<S: Snapshot, L: LockManager>(
     cmd: Command,
     snapshot: S,
     lock_mgr: Option<L>,
+    concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
     statistics: &mut Statistics,
     pipelined_pessimistic_lock: bool,
 ) -> Result<WriteResult> {

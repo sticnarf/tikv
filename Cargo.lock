@@ -580,6 +580,7 @@ dependencies = [
  "cdc",
  "chrono",
  "clap",
+ "concurrency_manager",
  "encryption",
  "engine",
  "engine_rocks",
@@ -644,7 +645,6 @@ name = "concurrency_manager"
 version = "0.0.1"
 dependencies = [
  "async-mutex",
- "async-trait",
  "kvproto",
  "thiserror",
  "tokio 0.2.13",
@@ -4179,6 +4179,7 @@ dependencies = [
 name = "test_raftstore"
 version = "0.0.1"
 dependencies = [
+ "concurrency_manager",
  "encryption",
  "engine",
  "engine_rocks",
@@ -4550,6 +4551,7 @@ dependencies = [
  "cache-size",
  "chrono",
  "codec",
+ "concurrency_manager",
  "configuration",
  "crc32fast",
  "crc64fast",

@@ -44,6 +44,7 @@ use crate::storage::{
     },
     types::StorageCallbackType,
 };
+use concurrency_manager::MutexBTreeConcurrencyManager;
 use engine_traits::{CfName, ALL_CFS, CF_DEFAULT, DATA_CFS};
 use engine_traits::{IterOptions, DATA_KEY_PREFIX_LEN};
 use futures::Future;
@@ -87,6 +88,8 @@ pub struct Storage<E: Engine, L: LockManager> {
     /// The thread pool used to run most read operations.
     read_pool: ReadPoolHandle,
 
+    concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+
     /// How many strong references. Thread pool and workers will be stopped
     /// once there are no more references.
     // TODO: This should be implemented in thread pool and worker.
@@ -111,6 +114,7 @@ impl<E: Engine, L: LockManager> Clone for Storage<E, L> {
             engine: self.engine.clone(),
             sched: self.sched.clone(),
             read_pool: self.read_pool.clone(),
+            concurrency_manager: self.concurrency_manager.clone(),
             refs: self.refs.clone(),
             max_key_size: self.max_key_size,
             pessimistic_txn_enabled: self.pessimistic_txn_enabled,
@@ -156,6 +160,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
         engine: E,
         config: &Config,
         read_pool: ReadPoolHandle,
+        concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
         lock_mgr: Option<L>,
         pipelined_pessimistic_lock: bool,
     ) -> Result<Self> {
@@ -163,6 +168,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
         let sched = TxnScheduler::new(
             engine.clone(),
             lock_mgr,
+            concurrency_manager.clone(),
             config.scheduler_concurrency,
             config.scheduler_worker_pool_size,
             config.scheduler_pending_write_threshold.0 as usize,
@@ -175,6 +181,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
             engine,
             sched,
             read_pool,
+            concurrency_manager,
             refs: Arc::new(atomic::AtomicUsize::new(1)),
             max_key_size: config.max_key_size,
             pessimistic_txn_enabled,
@@ -1362,6 +1369,7 @@ impl<E: Engine, L: LockManager> TestStorageBuilder<E, L> {
             self.engine,
             &self.config,
             ReadPool::from(read_pool).handle(),
+            Arc::new(MutexBTreeConcurrencyManager::new(1.into())),
             self.lock_mgr,
             self.pipelined_pessimistic_lock,
         )

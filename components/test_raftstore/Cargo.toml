@@ -27,6 +27,7 @@ prost-codec = [
 ]
 
 [dependencies]
+concurrency_manager = { path = "../concurrency_manager" }
 engine = { path = "../engine" }
 engine_traits = { path = "../engine_traits" }
 engine_rocks = { path = "../engine_rocks" }

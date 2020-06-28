@@ -14,6 +14,7 @@ use kvproto::raft_serverpb;
 use tempfile::{Builder, TempDir};
 
 use super::*;
+use concurrency_manager::MutexBTreeConcurrencyManager;
 use encryption::DataKeyManager;
 use engine::Engines;
 use engine_rocks::{Compat, RocksEngine, RocksSnapshot};
@@ -183,11 +184,13 @@ impl Simulator for ServerCluster {
         );
         gc_worker.start().unwrap();
 
+        let concurrency_manager = Arc::new(MutexBTreeConcurrencyManager::new(1.into()));
         let mut lock_mgr = LockManager::new();
         let store = create_raft_storage(
             engine,
             &cfg.storage,
             storage_read_pool.handle(),
+            concurrency_manager,
             Some(lock_mgr.clone()),
             false,
         )?;

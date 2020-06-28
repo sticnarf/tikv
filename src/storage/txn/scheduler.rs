@@ -26,6 +26,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::u64;
 
+use concurrency_manager::MutexBTreeConcurrencyManager;
 use kvproto::kvrpcpb::CommandPri;
 use tikv_util::{callback::must_call, collections::HashMap, time::Instant};
 use txn_types::TimeStamp;
@@ -196,6 +197,8 @@ struct SchedulerInner<L: LockManager> {
 
     lock_mgr: Option<L>,
 
+    concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
+
     pipelined_pessimistic_lock: bool,
 }
 
@@ -291,6 +294,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
     pub fn new(
         engine: E,
         lock_mgr: Option<L>,
+        concurrency_manager: Arc<MutexBTreeConcurrencyManager>,
         concurrency: usize,
         worker_pool_size: usize,
         sched_pending_write_threshold: usize,
@@ -317,6 +321,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                 "sched-high-pri-pool",
             ),
             lock_mgr,
+            concurrency_manager,
             pipelined_pessimistic_lock,
         });
 
@@ -347,6 +352,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             scheduler,
             pool,
             self.inner.lock_mgr.clone(),
+            self.inner.concurrency_manager.clone(),
             self.inner.pipelined_pessimistic_lock,
         )
     }
