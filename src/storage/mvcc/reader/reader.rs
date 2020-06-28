@@ -525,7 +525,7 @@ mod tests {
             let snap =
                 RegionSnapshot::<RocksSnapshot>::from_raw(self.db.c().clone(), self.region.clone());
             let mut txn = MvccTxn::new(snap, start_ts.into(), true);
-            txn.prewrite(m, pk, false, 0, 0, TimeStamp::default())
+            txn.prewrite(m, pk, false, 0, 0, TimeStamp::default(), false, Vec::new())
                 .unwrap();
             self.write(txn.into_modifies());
         }
@@ -548,6 +548,8 @@ mod tests {
                 0,
                 TimeStamp::default(),
                 false,
+                false,
+                Vec::new(),
             )
             .unwrap();
             self.write(txn.into_modifies());

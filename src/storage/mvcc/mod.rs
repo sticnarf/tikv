@@ -342,6 +342,8 @@ pub mod tests {
             0,
             0,
             TimeStamp::default(),
+            false,
+            Vec::new(),
         )?;
         write(engine, &ctx, txn.into_modifies());
         Ok(())
@@ -363,6 +365,8 @@ pub mod tests {
             0,
             0,
             TimeStamp::default(),
+            false,
+            Vec::new(),
         )?;
         Ok(())
     }
@@ -385,6 +389,8 @@ pub mod tests {
             0,
             TimeStamp::default(),
             false,
+            false,
+            Vec::new(),
         )?;
         Ok(())
     }
@@ -407,8 +413,17 @@ pub mod tests {
         let mut txn = MvccTxn::new(snapshot, ts.into(), true);
         let mutation = Mutation::Put((Key::from_raw(key), value.to_vec()));
         if for_update_ts.is_zero() {
-            txn.prewrite(mutation, pk, false, lock_ttl, txn_size, min_commit_ts)
-                .unwrap();
+            txn.prewrite(
+                mutation,
+                pk,
+                false,
+                lock_ttl,
+                txn_size,
+                min_commit_ts,
+                false,
+                Vec::new(),
+            )
+            .unwrap();
         } else {
             txn.pessimistic_prewrite(
                 mutation,
@@ -419,6 +434,8 @@ pub mod tests {
                 txn_size,
                 min_commit_ts,
                 pipelined_pessimistic_lock,
+                false,
+                Vec::new(),
             )
             .unwrap();
         }
@@ -564,8 +581,17 @@ pub mod tests {
         let mutation = Mutation::Put((Key::from_raw(key), value.to_vec()));
         let for_update_ts = for_update_ts.into();
         if for_update_ts.is_zero() {
-            txn.prewrite(mutation, pk, false, 0, 0, TimeStamp::default())
-                .unwrap_err()
+            txn.prewrite(
+                mutation,
+                pk,
+                false,
+                0,
+                0,
+                TimeStamp::default(),
+                false,
+                Vec::new(),
+            )
+            .unwrap_err()
         } else {
             txn.pessimistic_prewrite(
                 mutation,
@@ -576,6 +602,8 @@ pub mod tests {
                 0,
                 TimeStamp::default(),
                 pipelined_pessimistic_lock,
+                false,
+                Vec::new(),
             )
             .unwrap_err()
         }
@@ -647,8 +675,17 @@ pub mod tests {
         let mutation = Mutation::Delete(Key::from_raw(key));
         let for_update_ts = for_update_ts.into();
         if for_update_ts.is_zero() {
-            txn.prewrite(mutation, pk, false, 0, 0, TimeStamp::default())
-                .unwrap();
+            txn.prewrite(
+                mutation,
+                pk,
+                false,
+                0,
+                0,
+                TimeStamp::default(),
+                false,
+                Vec::new(),
+            )
+            .unwrap();
         } else {
             txn.pessimistic_prewrite(
                 mutation,
@@ -659,6 +696,8 @@ pub mod tests {
                 0,
                 TimeStamp::default(),
                 false,
+                false,
+                Vec::new(),
             )
             .unwrap();
         }
@@ -699,8 +738,17 @@ pub mod tests {
         let for_update_ts = for_update_ts.into();
         let mutation = Mutation::Lock(Key::from_raw(key));
         if for_update_ts.is_zero() {
-            txn.prewrite(mutation, pk, false, 0, 0, TimeStamp::default())
-                .unwrap();
+            txn.prewrite(
+                mutation,
+                pk,
+                false,
+                0,
+                0,
+                TimeStamp::default(),
+                false,
+                Vec::new(),
+            )
+            .unwrap();
         } else {
             txn.pessimistic_prewrite(
                 mutation,
@@ -711,6 +759,8 @@ pub mod tests {
                 0,
                 TimeStamp::default(),
                 false,
+                false,
+                Vec::new(),
             )
             .unwrap();
         }
@@ -742,7 +792,9 @@ pub mod tests {
                 false,
                 0,
                 0,
-                TimeStamp::default()
+                TimeStamp::default(),
+                false,
+                Vec::new(),
             )
             .is_err());
     }
