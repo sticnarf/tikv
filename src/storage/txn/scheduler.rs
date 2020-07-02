@@ -45,8 +45,8 @@ use crate::storage::txn::{
     Error, ProcessResult,
 };
 use crate::storage::{
-    get_priority_tag, types::StorageCallback, Error as StorageError,
-    ErrorInner as StorageErrorInner,
+    concurrency_manager::ConcurrencyManager, get_priority_tag, types::StorageCallback,
+    Error as StorageError, ErrorInner as StorageErrorInner,
 };
 
 const TASKS_SLOTS_NUM: usize = 1 << 12; // 4096 slots.
@@ -282,6 +282,7 @@ pub struct Scheduler<E: Engine, L: LockManager> {
     // `engine` is `None` means currently the program is in scheduler worker threads.
     engine: Option<E>,
     inner: Arc<SchedulerInner<L>>,
+    concurrency_manager: Option<ConcurrencyManager>,
 }
 
 unsafe impl<E: Engine, L: LockManager> Send for Scheduler<E, L> {}
@@ -295,6 +296,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         worker_pool_size: usize,
         sched_pending_write_threshold: usize,
         pipelined_pessimistic_lock: bool,
+        concurrency_manager: Option<ConcurrencyManager>,
     ) -> Self {
         // Add 2 logs records how long is need to initialize TASKS_SLOTS_NUM * 2048000 `Mutex`es.
         // In a 3.5G Hz machine it needs 1.3s, which is a notable duration during start-up.
@@ -324,6 +326,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         Scheduler {
             engine: Some(engine),
             inner,
+            concurrency_manager,
         }
     }
 
@@ -342,6 +345,7 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
         let scheduler = Scheduler {
             engine: None,
             inner: Arc::clone(&self.inner),
+            concurrency_manager: self.concurrency_manager.clone(),
         };
         Executor::new(
             scheduler,
@@ -392,7 +396,11 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             });
             return;
         }
-        self.schedule_command(cmd, callback);
+        if let Some(concurrency_manager) = &self.concurrency_manager {
+            // use concurrency manager instead of the latches
+        } else {
+            self.schedule_command(cmd, callback);
+        }
     }
 
     /// Initiates an async operation to get a snapshot from the storage engine, then posts a

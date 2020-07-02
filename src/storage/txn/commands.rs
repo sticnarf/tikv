@@ -1,13 +1,16 @@
 // Copyright 2019 TiKV Project Authors. Licensed under Apache-2.0.
 
 use std::fmt::{self, Debug, Display, Formatter};
+use std::future::Future;
 use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
+use std::pin::Pin;
 
 use kvproto::kvrpcpb::*;
 use tikv_util::collections::HashMap;
 use txn_types::{Key, Lock, Mutation, TimeStamp};
 
+use crate::storage::concurrency_manager::{ConcurrencyManager, OrderedLockMap, TxnMutexGuard};
 use crate::storage::lock_manager::WaitTimeout;
 use crate::storage::metrics::{self, KV_COMMAND_COUNTER_VEC_STATIC};
 use crate::storage::txn::latch::{self, Latches};
@@ -268,6 +271,11 @@ pub trait CommandExt {
     fn write_bytes(&self) -> usize;
 
     fn gen_lock(&self, _latches: &Latches) -> latch::Lock;
+
+    fn lock_keys<'cm>(
+        &self,
+        concurrency_manager: ConcurrencyManager,
+    ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>>;
 }
 
 macro_rules! command {
@@ -339,10 +347,24 @@ macro_rules! gen_lock {
         fn gen_lock(&self, _latches: &Latches) -> latch::Lock {
             latch::Lock::new(vec![])
         }
+
+        fn lock_keys<'cm>(
+            &self,
+            concurrency_manager: ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
+            Box::pin(async { Vec::new() })
+        }
     };
     ($field: ident) => {
         fn gen_lock(&self, latches: &Latches) -> latch::Lock {
             latches.gen_lock(&[&self.$field])
+        }
+
+        fn lock_keys<'cm>(
+            &self,
+            concurrency_manager: ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
+            Box::pin(async { vec![concurrency_manager.lock_key(&self.$field).await] })
         }
     };
     ($field: ident: multiple) => {

@@ -25,7 +25,7 @@ use std::{
 };
 use txn_types::TimeStamp;
 
-type OrderedLockMap = Mutex<BTreeMap<Vec<u8>, Arc<MemoryLock>>>;
+pub type OrderedLockMap = Mutex<BTreeMap<Vec<u8>, Arc<MemoryLock>>>;
 pub type LockTable = self::lock_table::LockTable<OrderedLockMap>;
 
 #[derive(Clone)]

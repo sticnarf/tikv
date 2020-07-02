@@ -35,6 +35,8 @@ pub struct Config {
     // Reserve disk space to make tikv would have enough space to compact when disk is full.
     pub reserve_space: ReadableSize,
     pub block_cache: BlockCacheConfig,
+    // It's a temporary option during transaction refactoring.
+    pub use_concurrent_manager: bool,
 }
 
 impl Default for Config {
@@ -49,6 +51,7 @@ impl Default for Config {
             scheduler_pending_write_threshold: ReadableSize::mb(DEFAULT_SCHED_PENDING_WRITE_MB),
             reserve_space: ReadableSize::gb(DEFAULT_RESERVER_SPACE_SIZE),
             block_cache: BlockCacheConfig::default(),
+            use_concurrent_manager: false,
         }
     }
 }
