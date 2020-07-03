@@ -166,7 +166,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
         pipelined_pessimistic_lock: bool,
     ) -> Result<Self> {
         let pessimistic_txn_enabled = lock_mgr.is_some();
-        let scheduler_cm = if config.use_concurrent_manager {
+        let scheduler_concurrency_manager = if config.use_concurrency_manager {
             Some(concurrency_manager.clone())
         } else {
             None
@@ -178,7 +178,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
             config.scheduler_worker_pool_size,
             config.scheduler_pending_write_threshold.0 as usize,
             pipelined_pessimistic_lock,
-            scheduler_cm,
+            scheduler_concurrency_manager,
         );
 
         info!("Storage started.");

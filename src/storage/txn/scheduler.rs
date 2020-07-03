@@ -383,7 +383,12 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
     /// the method initiates a get snapshot operation for further processing.
     fn try_to_wake_up(&self, cid: u64) {
         if self.inner.acquire_lock(cid) {
-            self.get_snapshot(cid);
+            // Temporary solution while refactoring
+            if let Some(concurrency_manager) = self.concurrency_manager.clone() {
+                self.run_with_concurrency_manager(concurrency_manager, cid)
+            } else {
+                self.get_snapshot(cid);
+            }
         }
     }
 
@@ -396,11 +401,41 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
             });
             return;
         }
-        if let Some(concurrency_manager) = &self.concurrency_manager {
-            // use concurrency manager instead of the latches
-        } else {
-            self.schedule_command(cmd, callback);
-        }
+
+        self.schedule_command(cmd, callback);
+    }
+
+    fn run_with_concurrency_manager(&self, concurrency_manager: ConcurrencyManager, cid: u64) {
+        let task = self.inner.dequeue_task(cid);
+        let tag = task.tag;
+        let ctx = task.context().clone();
+        let executor = self.fetch_executor(task.priority(), task.cmd().is_sys_cmd());
+        let scheduler = self.clone();
+        executor.clone_pool().pool.spawn(async move {
+            let guards = task.cmd().lock_keys(&concurrency_manager).await;
+
+            let cb = must_call(
+                move |(cb_ctx, snapshot)| {
+                    executor.execute(cb_ctx, snapshot, task);
+                },
+                drop_snapshot_callback::<E>,
+            );
+
+            let f = |engine: &E| {
+                if let Err(e) = engine.async_snapshot(&ctx, cb) {
+                    SCHED_STAGE_COUNTER_VEC.get(tag).async_snapshot_err.inc();
+
+                    info!("engine async_snapshot failed"; "err" => ?e);
+                    scheduler.finish_with_err(cid, e.into());
+                } else {
+                    SCHED_STAGE_COUNTER_VEC.get(tag).snapshot.inc();
+                }
+            };
+
+            // The program is currently in scheduler worker threads.
+            // Safety: `self.inner.worker_pool` should ensure that a TLS engine exists.
+            unsafe { with_tls_engine(f) }
+        });
     }
 
     /// Initiates an async operation to get a snapshot from the storage engine, then posts a

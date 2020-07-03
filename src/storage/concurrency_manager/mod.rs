@@ -62,9 +62,9 @@ impl ConcurrencyManager {
     /// is visible to `read_key_check` and `read_range_check`.
     pub async fn lock_keys(
         &self,
-        keys: impl Iterator<Item = &Key>,
+        keys: impl IntoIterator<Item = &Key>,
     ) -> Vec<TxnMutexGuard<'_, OrderedLockMap>> {
-        let mut keys_with_index: Vec<_> = keys.enumerate().collect();
+        let mut keys_with_index: Vec<_> = keys.into_iter().enumerate().collect();
         // To prevent deadlock, we sort the keys and lock them one by one.
         keys_with_index.sort_by_key(|(_, key)| *key);
         let mut result: Vec<MaybeUninit<TxnMutexGuard<'_, OrderedLockMap>>> = Vec::new();

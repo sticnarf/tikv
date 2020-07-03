@@ -28,6 +28,7 @@ use crate::storage::txn::{
     Error, ErrorInner, ProcessResult, Result,
 };
 use crate::storage::{
+    concurrency_manager::{OrderedLockMap, TxnMutexGuard},
     metrics::{self, KV_COMMAND_KEYWRITE_HISTOGRAM_VEC, SCHED_STAGE_COUNTER_VEC},
     types::{MvccInfo, PessimisticLockRes, TxnStatus},
     Error as StorageError, ErrorInner as StorageErrorInner, Result as StorageResult,
@@ -50,6 +51,9 @@ pub struct Task {
     cmd: Command,
     ts: TimeStamp,
     region_id: u64,
+
+    // lock guards from concurrency manager
+    lock_guards: Vec<TxnMutexGuard<'a, OrderedLockMap>>,
 }
 
 impl Task {
@@ -114,7 +118,7 @@ impl<E: Engine, S: MsgScheduler, L: LockManager> Executor<E, S, L> {
         self.sched_pool.take().unwrap()
     }
 
-    fn clone_pool(&mut self) -> SchedPool {
+    pub fn clone_pool(&self) -> SchedPool {
         self.sched_pool.clone().unwrap()
     }
 

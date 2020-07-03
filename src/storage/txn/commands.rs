@@ -272,10 +272,10 @@ pub trait CommandExt {
 
     fn gen_lock(&self, _latches: &Latches) -> latch::Lock;
 
-    fn lock_keys<'cm>(
-        &self,
-        concurrency_manager: &'cm ConcurrencyManager,
-    ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>>;
+    fn lock_keys<'a>(
+        &'a self,
+        concurrency_manager: &'a ConcurrencyManager,
+    ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'a, OrderedLockMap>>> + Send + 'a>>;
 }
 
 macro_rules! command {
@@ -348,10 +348,10 @@ macro_rules! gen_lock {
             latch::Lock::new(vec![])
         }
 
-        fn lock_keys<'cm>(
+        fn lock_keys<'a>(
             &self,
-            concurrency_manager: &'cm ConcurrencyManager,
-        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
+            _concurrency_manager: &'a ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'a, OrderedLockMap>>> + Send + 'a>> {
             Box::pin(async { Vec::new() })
         }
     };
@@ -360,10 +360,10 @@ macro_rules! gen_lock {
             latches.gen_lock(iter::once(&self.$field))
         }
 
-        fn lock_keys<'cm>(
-            &self,
-            concurrency_manager: &'cm ConcurrencyManager,
-        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
+        fn lock_keys<'a>(
+            &'a self,
+            concurrency_manager: &'a ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'a, OrderedLockMap>>> + Send + 'a>> {
             Box::pin(async move { vec![concurrency_manager.lock_key(&self.$field).await] })
         }
     };
@@ -372,10 +372,10 @@ macro_rules! gen_lock {
             latches.gen_lock(&self.$field)
         }
 
-        fn lock_keys<'cm>(
-            &self,
-            concurrency_manager: &'cm ConcurrencyManager,
-        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
+        fn lock_keys<'a>(
+            &'a self,
+            concurrency_manager: &'a ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'a, OrderedLockMap>>> + Send + 'a>> {
             Box::pin(async move { concurrency_manager.lock_keys(&self.$field).await })
         }
     };
@@ -386,15 +386,17 @@ macro_rules! gen_lock {
             latches.gen_lock(keys)
         }
 
-        fn lock_keys<'cm>(
-            &self,
-            concurrency_manager: &'cm ConcurrencyManager,
-        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
-            Box::pin(async move {
-                concurrency_manager
-                    .lock_keys(&self.$field.iter().map($transform))
-                    .await
-            })
+        fn lock_keys<'a>(
+            &'a self,
+            concurrency_manager: &'a ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'a, OrderedLockMap>>> + Send + 'a>> {
+            Box::pin(
+                async move {
+                    #![allow(unused_parens)]
+                    let keys = self.$field.iter().map($transform);
+                    concurrency_manager.lock_keys(keys).await
+                },
+            )
         }
     };
 }
@@ -988,6 +990,13 @@ impl Command {
 
     pub fn can_be_pipelined(&self) -> bool {
         self.command_ext().can_be_pipelined()
+    }
+
+    pub fn lock_keys<'a>(
+        &'a self,
+        concurrency_manager: &'a ConcurrencyManager,
+    ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'a, OrderedLockMap>>> + Send + 'a>> {
+        self.command_ext().lock_keys(concurrency_manager)
     }
 }
 
