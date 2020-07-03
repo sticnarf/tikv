@@ -274,7 +274,7 @@ pub trait CommandExt {
 
     fn lock_keys<'cm>(
         &self,
-        concurrency_manager: ConcurrencyManager,
+        concurrency_manager: &'cm ConcurrencyManager,
     ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>>;
 }
 
@@ -350,7 +350,7 @@ macro_rules! gen_lock {
 
         fn lock_keys<'cm>(
             &self,
-            concurrency_manager: ConcurrencyManager,
+            concurrency_manager: &'cm ConcurrencyManager,
         ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
             Box::pin(async { Vec::new() })
         }
@@ -362,14 +362,21 @@ macro_rules! gen_lock {
 
         fn lock_keys<'cm>(
             &self,
-            concurrency_manager: ConcurrencyManager,
+            concurrency_manager: &'cm ConcurrencyManager,
         ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
-            Box::pin(async { vec![concurrency_manager.lock_key(&self.$field).await] })
+            Box::pin(async move { vec![concurrency_manager.lock_key(&self.$field).await] })
         }
     };
     ($field: ident: multiple) => {
         fn gen_lock(&self, latches: &Latches) -> latch::Lock {
             latches.gen_lock(&self.$field)
+        }
+
+        fn lock_keys<'cm>(
+            &self,
+            concurrency_manager: &'cm ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
+            Box::pin(async move { concurrency_manager.lock_keys(&self.$field).await })
         }
     };
     ($field: ident: multiple$transform: tt) => {
@@ -377,6 +384,17 @@ macro_rules! gen_lock {
             #![allow(unused_parens)]
             let keys: Vec<&Key> = self.$field.iter().map($transform).collect();
             latches.gen_lock(&keys)
+        }
+
+        fn lock_keys<'cm>(
+            &self,
+            concurrency_manager: &'cm ConcurrencyManager,
+        ) -> Pin<Box<dyn Future<Output = Vec<TxnMutexGuard<'cm, OrderedLockMap>>>>> {
+            Box::pin(async move {
+                concurrency_manager
+                    .lock_keys(&self.$field.iter().map($transform))
+                    .await
+            })
         }
     };
 }
