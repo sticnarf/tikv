@@ -45,6 +45,11 @@ pub struct Config {
     #[config(skip)]
     // Reserve disk space to make tikv would have enough space to compact when disk is full.
     pub reserve_space: ReadableSize,
+    // Whether to use the concurrency manager and the new transaction implementation.
+    // This is an option used for development and will be removed in the future.
+    // USERS SHOULD NOT ENABLE IT!
+    #[config(skip)]
+    pub new_txn: bool,
     #[config(submodule)]
     pub block_cache: BlockCacheConfig,
 }
@@ -60,6 +65,7 @@ impl Default for Config {
             scheduler_worker_pool_size: if cpu_num >= 16 { 8 } else { 4 },
             scheduler_pending_write_threshold: ReadableSize::mb(DEFAULT_SCHED_PENDING_WRITE_MB),
             reserve_space: ReadableSize::gb(DEFAULT_RESERVER_SPACE_SIZE),
+            new_txn: false,
             block_cache: BlockCacheConfig::default(),
         }
     }
