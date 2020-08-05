@@ -23,6 +23,7 @@ pub struct DagHandlerBuilder<S: Store + 'static> {
     batch_row_limit: usize,
     is_streaming: bool,
     is_cache_enabled: bool,
+    is_cooperative: bool,
 }
 
 impl<S: Store + 'static> DagHandlerBuilder<S> {
@@ -34,6 +35,7 @@ impl<S: Store + 'static> DagHandlerBuilder<S> {
         batch_row_limit: usize,
         is_streaming: bool,
         is_cache_enabled: bool,
+        is_cooperative: bool,
     ) -> Self {
         DagHandlerBuilder {
             req,
@@ -44,6 +46,7 @@ impl<S: Store + 'static> DagHandlerBuilder<S> {
             batch_row_limit,
             is_streaming,
             is_cache_enabled,
+            is_cooperative,
         }
     }
 
@@ -63,6 +66,7 @@ impl<S: Store + 'static> DagHandlerBuilder<S> {
             self.is_cache_enabled,
             self.batch_row_limit,
             self.is_streaming,
+            self.is_cooperative,
         )?
         .into_boxed())
     }
@@ -130,6 +134,7 @@ impl BatchDAGHandler {
         is_cache_enabled: bool,
         streaming_batch_limit: usize,
         is_streaming: bool,
+        is_cooperative: bool,
     ) -> Result<Self> {
         Ok(Self {
             runner: tidb_query_vec_executors::runner::BatchExecutorsRunner::from_request(
@@ -139,6 +144,7 @@ impl BatchDAGHandler {
                 deadline,
                 streaming_batch_limit,
                 is_streaming,
+                is_cooperative,
             )?,
             data_version,
         })

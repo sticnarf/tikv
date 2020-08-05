@@ -63,6 +63,10 @@ pub struct BatchExecutorsRunner<SS> {
     /// 1. default: result is encoded row by row using datum format.
     /// 2. chunk: result is encoded column by column using chunk format.
     encode_type: EncodeType,
+
+    /// If `is_cooperative` is true, the runner coroutine will voluntarily yield control
+    /// when it runs longer than `MAX_TIME_SLICE`.
+    is_cooperative: bool,
 }
 
 // We assign a dummy type `()` so that we can omit the type when calling `check_supported`.
@@ -316,6 +320,7 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
         deadline: Deadline,
         stream_row_limit: usize,
         is_streaming: bool,
+        is_cooperative: bool,
     ) -> Result<Self> {
         let executors_len = req.get_executors().len();
         let collect_exec_summary = req.get_collect_execution_summaries();
@@ -359,6 +364,7 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
             exec_stats,
             encode_type,
             stream_row_limit,
+            is_cooperative,
         })
     }
 
@@ -372,7 +378,7 @@ impl<SS: 'static> BatchExecutorsRunner<SS> {
         loop {
             let time_slice_len = time_slice_start.elapsed();
             // Check whether we should yield from the execution
-            if time_slice_len > MAX_TIME_SLICE {
+            if self.is_cooperative && time_slice_len > MAX_TIME_SLICE {
                 reschedule().await;
                 time_slice_start = Instant::now();
             }

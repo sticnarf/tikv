@@ -196,6 +196,12 @@ impl<E: Engine> Endpoint<E> {
                     cache_match_version,
                 );
                 let batch_row_limit = self.get_batch_row_limit(is_streaming);
+                // If the DAG request runs as a cooperative coroutine, it will yield
+                // control when it runs continuously longer than some time period.
+                // To enable cooperative coroutine, the semaphore is needed to ensure
+                // that there are not too many large requests running at the same time
+                // to reduce the risk of OOM.
+                let is_cooperative = self.semaphore.is_some();
                 builder = Box::new(move |snap, req_ctx: &ReqContext| {
                     // TODO: Remove explicit type once rust-lang#41078 is resolved
                     let data_version = snap.get_data_version();
@@ -215,6 +221,7 @@ impl<E: Engine> Endpoint<E> {
                         batch_row_limit,
                         is_streaming,
                         req.get_is_cache_enabled(),
+                        is_cooperative,
                     )
                     .data_version(data_version)
                     .build()
