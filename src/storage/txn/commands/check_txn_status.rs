@@ -74,12 +74,10 @@ impl<S: Snapshot, L: LockManager> WriteCommand<S, L> for CheckTxnStatus {
 
         let result = match txn.reader.load_lock(&self.primary_key)? {
             Some(mut lock) if lock.ts == self.lock_ts => {
-                if lock.use_async_commit
-                    && (!self.caller_start_ts.is_zero() || !self.current_ts.is_zero())
-                {
-                    return Err(MvccError::from(MvccErrorInner::Other(box_err!(
-                        "cannot call check_txn_status with caller_start_ts or current_ts set on async commit transaction"
-                    ))).into());
+                if lock.use_async_commit {
+                    warn!("check_txn_status async commit"; "caller_start_ts" => self.caller_start_ts, "current_ts" => self.current_ts);
+                    self.caller_start_ts = TimeStamp::zero();
+                    self.current_ts = TimeStamp::zero();
                 }
 
                 let is_pessimistic_txn = !lock.for_update_ts.is_zero();
