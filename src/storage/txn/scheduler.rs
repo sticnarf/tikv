@@ -21,13 +21,19 @@
 //! to the scheduler.
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::u64;
+use std::{
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    time::Duration,
+};
 
 use concurrency_manager::{ConcurrencyManager, KeyHandleGuard};
+use futures::{compat::Future01CompatExt, future::Either, Future, FutureExt};
 use kvproto::kvrpcpb::{CommandPri, ExtraOp};
-use tikv_util::{callback::must_call, collections::HashMap, time::Instant};
+use tikv_util::{
+    callback::must_call, collections::HashMap, time::Instant, timer::GLOBAL_TIMER_HANDLE,
+};
 use txn_types::TimeStamp;
 
 use crate::storage::kv::{
@@ -646,7 +652,23 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                             .clone()
                             .pool
                             .spawn(async move {
-                                fail_point!("scheduler_async_write_finish");
+                                fn gen_delay() -> impl Future<Output = ()> {
+                                    fail_point!("scheduler_async_write_finish", |r| {
+                                        Either::Left(
+                                            GLOBAL_TIMER_HANDLE
+                                                .delay(
+                                                    std::time::Instant::now()
+                                                        + Duration::from_millis(
+                                                            r.unwrap().parse().unwrap(),
+                                                        ),
+                                                )
+                                                .compat()
+                                                .map(|_| ()),
+                                        )
+                                    });
+                                    Either::Right(async {})
+                                }
+                                gen_delay().await;
 
                                 sched.on_write_finished(
                                     cid,
