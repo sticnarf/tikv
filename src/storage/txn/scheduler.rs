@@ -21,13 +21,19 @@
 //! to the scheduler.
 
 use parking_lot::Mutex;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::u64;
+use std::{
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    time::Duration,
+};
 
 use concurrency_manager::{ConcurrencyManager, KeyHandleGuard};
+use futures::compat::Future01CompatExt;
 use kvproto::kvrpcpb::{CommandPri, ExtraOp};
-use tikv_util::{callback::must_call, collections::HashMap, time::Instant};
+use tikv_util::{
+    callback::must_call, collections::HashMap, time::Instant, timer::GLOBAL_TIMER_HANDLE,
+};
 use txn_types::TimeStamp;
 
 use crate::storage::kv::{
@@ -647,6 +653,10 @@ impl<E: Engine, L: LockManager> Scheduler<E, L> {
                             .pool
                             .spawn(async move {
                                 fail_point!("scheduler_async_write_finish");
+                                let _ = GLOBAL_TIMER_HANDLE
+                                    .delay(std::time::Instant::now() + Duration::from_secs(1))
+                                    .compat()
+                                    .await;
 
                                 sched.on_write_finished(
                                     cid,
