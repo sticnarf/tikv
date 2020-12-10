@@ -1067,6 +1067,9 @@ where
         } else if msg_type == MessageType::MsgTransferLeader {
             self.execute_transfer_leader(ctx, &m);
             return Ok(());
+        } else if msg_type == MessageType::MsgReadIndexResp {
+            let rctx = ReadIndexContext::parse(m.get_entries()[0].get_data()).unwrap();
+            info!("msg read index resp"; "rctx" => ?rctx);
         }
 
         self.raft_group.step(m)?;
@@ -1833,6 +1836,7 @@ where
             if let Some(locked) = read.locked.take() {
                 let mut response = raft_cmdpb::Response::default();
                 response.mut_read_index().set_locked(*locked);
+                info!("response locked"; "resp" => ?response);
                 let mut cmd_resp = RaftCmdResponse::default();
                 cmd_resp.mut_responses().push(response);
                 cb.invoke_read(ReadResponse {
@@ -2427,6 +2431,7 @@ where
 
         let read = self.pending_reads.back_mut().unwrap();
         debug_assert!(read.read_index.is_none());
+        info!("retry read index with request"; "read_id" => ?read.id,  "req" => ?read.addition_request.as_deref());
         self.raft_group
             .read_index(ReadIndexContext::fields_to_bytes(
                 read.id,
@@ -2540,6 +2545,7 @@ where
             .get_mut(0)
             .filter(|req| req.has_read_index())
             .map(|req| req.take_read_index());
+        info!("read index with request"; "read_id" => ?id, "req" => ?req);
         self.raft_group
             .read_index(ReadIndexContext::fields_to_bytes(
                 id,

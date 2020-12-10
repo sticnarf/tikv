@@ -698,6 +698,7 @@ impl ReadIndexObserver for ReplicaReadLockChecker {
         assert_eq!(msg.get_entries().len(), 1);
         let mut rctx = ReadIndexContext::parse(msg.get_entries()[0].get_data()).unwrap();
         if let Some(mut request) = rctx.request.take() {
+            let req = request.clone();
             let start_ts = request.get_start_ts().into();
             self.concurrency_manager.update_max_ts(start_ts);
             for range in request.mut_key_ranges().iter_mut() {
@@ -726,6 +727,7 @@ impl ReadIndexObserver for ReplicaReadLockChecker {
                     rctx.locked = Some(lock);
                 }
             }
+            info!("replica read lock check"; "req" => ?req, "rctx" => ?rctx);
             msg.mut_entries()[0].set_data(rctx.to_bytes());
         }
     }

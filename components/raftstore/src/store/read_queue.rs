@@ -227,6 +227,7 @@ where
                 // clear addition_request to indicate lock checking has finished
                 self.reads[offset].addition_request = None;
                 self.reads[offset].locked = locked.map(Box::new);
+                info!("advance replica read"; "read_id" => ?uuid, "locked" => ?self.reads[offset].locked);
                 if let Some(occur_index) = self.reads[offset].read_index {
                     if occur_index < index {
                         continue;

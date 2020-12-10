@@ -63,16 +63,28 @@ impl KeyHandleGuard {
     }
 
     pub fn with_lock<T>(&self, f: impl FnOnce(&mut Option<Lock>) -> T) -> T {
-        f(&mut *self.handle.lock_store.lock())
+        let mut lock = self.handle.lock_store.lock();
+        let not_locked = lock.is_none();
+        let res = f(&mut *lock);
+        if let Some(lock) = &*lock {
+            if not_locked {
+                info!("lock memory lock"; "key" => ?self.key(), "ts" => lock.ts);
+            }
+        }
+        res
     }
 }
 
 impl Drop for KeyHandleGuard {
     fn drop(&mut self) {
+        let mut lock = self.handle.lock_store.lock();
+        if let Some(lock) = &*lock {
+            info!("unlock memory lock"; "key" => ?self.key(), "ts" => lock.ts);
+        }
         // We only keep the lock in memory until the write to the underlying
         // store finishes.
         // The guard can be released after finishes writing.
-        *self.handle.lock_store.lock() = None;
+        *lock = None;
     }
 }
 

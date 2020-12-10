@@ -141,6 +141,7 @@ pub fn acquire_pessimistic_lock<S: Snapshot>(
         for_update_ts,
         min_commit_ts,
     );
+    info!("acquire lock"; "key" => ?key, "value" => ?val, "start_ts" => txn.start_ts);
     txn.put_lock(key, &lock);
 
     Ok(val)

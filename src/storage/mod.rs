@@ -283,9 +283,18 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
                     start_ts,
                     &bypass_locks,
                     &concurrency_manager,
-                )?;
-                let snapshot =
-                    Self::with_tls_engine(|engine| Self::snapshot(engine, snap_ctx)).await?;
+                )
+                .map_err(|e| {
+                    info!("prepare snapshot err"; "error" => ?e);
+                    e
+                })?;
+                info!("get snapshot"; "key" => ?key, "ts" => start_ts);
+                let snapshot = Self::with_tls_engine(|engine| Self::snapshot(engine, snap_ctx))
+                    .await
+                    .map_err(|e| {
+                        info!("get snapshot err"; "error" => ?e);
+                        e
+                    })?;
                 {
                     let begin_instant = Instant::now_coarse();
                     let mut statistics = Statistics::default();
@@ -306,6 +315,7 @@ impl<E: Engine, L: LockManager> Storage<E, L> {
                             KV_COMMAND_KEYREAD_HISTOGRAM_STATIC.get(CMD).observe(1_f64);
                             r
                         });
+                    info!("get result"; "key" => ?key, "ts" => start_ts, "result" => ?result);
 
                     metrics::tls_collect_scan_details(CMD, &statistics);
                     metrics::tls_collect_read_flow(ctx.get_region_id(), &statistics);
