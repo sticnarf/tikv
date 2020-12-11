@@ -993,7 +993,11 @@ where
                 MessageType::MsgHeartbeatResponse => metrics.heartbeat_resp += 1,
                 MessageType::MsgTransferLeader => metrics.transfer_leader += 1,
                 MessageType::MsgReadIndex => metrics.read_index += 1,
-                MessageType::MsgReadIndexResp => metrics.read_index_resp += 1,
+                MessageType::MsgReadIndexResp => {
+                    metrics.read_index_resp += 1;
+                    let rctx = ReadIndexContext::parse(msg.get_entries()[0].get_data()).unwrap();
+                    info!("send msg read index resp"; "rctx" => ?rctx, "term" => msg.term, "index" => msg.index);
+                }
                 MessageType::MsgTimeoutNow => {
                     // After a leader transfer procedure is triggered, the lease for
                     // the old leader may be expired earlier than usual, since a new leader
@@ -1069,7 +1073,7 @@ where
             return Ok(());
         } else if msg_type == MessageType::MsgReadIndexResp {
             let rctx = ReadIndexContext::parse(m.get_entries()[0].get_data()).unwrap();
-            info!("msg read index resp"; "rctx" => ?rctx);
+            info!("recv msg read index resp"; "rctx" => ?rctx, "term" => m.term, "index" => m.index);
         }
 
         self.raft_group.step(m)?;

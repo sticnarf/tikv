@@ -1100,6 +1100,7 @@ where
         ctx.exec_ctx = Some(self.new_ctx(index, term));
         ctx.kv_wb_mut().set_save_point();
         let mut origin_epoch = None;
+        info!("apply raft cmd"; "term" => term, "index"=>index,"region_id"=>self.region.id);
         let (resp, exec_result) = match self.exec_raft_cmd(ctx, &req) {
             Ok(a) => {
                 ctx.kv_wb_mut().pop_save_point().unwrap();
@@ -1358,6 +1359,7 @@ where
 
         let resp = Response::default();
         let key = keys::data_key(key);
+        info!("handle put";"key"=>hex::encode_upper(&key),"region_id"=>self.region.id);
         self.metrics.size_diff_hint += key.len() as i64;
         self.metrics.size_diff_hint += value.len() as i64;
         if !req.get_put().get_cf().is_empty() {
