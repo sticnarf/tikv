@@ -2293,7 +2293,7 @@ dependencies = [
 [[package]]
 name = "librocksdb_sys"
 version = "0.1.0"
-source = "git+https://github.com/tikv/rust-rocksdb.git#317625fb85ef201e89d1d3a59340005419efcd1e"
+source = "git+https://github.com/sticnarf/rust-rocksdb.git?branch=jemalloc-clang#8fe3eff808a3ad986b36f7d37e12a46d3d18af6f"
 dependencies = [
  "bindgen",
  "bzip2-sys",
@@ -2304,7 +2304,6 @@ dependencies = [
  "libz-sys",
  "lz4-sys",
  "openssl-sys",
- "snappy-sys",
  "tikv-jemalloc-sys",
  "zstd-sys",
 ]
@@ -2312,7 +2311,7 @@ dependencies = [
 [[package]]
 name = "libtitan_sys"
 version = "0.0.1"
-source = "git+https://github.com/tikv/rust-rocksdb.git#317625fb85ef201e89d1d3a59340005419efcd1e"
+source = "git+https://github.com/sticnarf/rust-rocksdb.git?branch=jemalloc-clang#8fe3eff808a3ad986b36f7d37e12a46d3d18af6f"
 dependencies = [
  "bzip2-sys",
  "cc",
@@ -2320,7 +2319,6 @@ dependencies = [
  "libc 0.2.86",
  "libz-sys",
  "lz4-sys",
- "snappy-sys",
  "zstd-sys",
 ]
 
@@ -3935,7 +3933,7 @@ checksum = "cabe4fa914dec5870285fa7f71f602645da47c486e68486d2b4ceb4a343e90ac"
 [[package]]
 name = "rocksdb"
 version = "0.3.0"
-source = "git+https://github.com/tikv/rust-rocksdb.git#317625fb85ef201e89d1d3a59340005419efcd1e"
+source = "git+https://github.com/sticnarf/rust-rocksdb.git?branch=jemalloc-clang#8fe3eff808a3ad986b36f7d37e12a46d3d18af6f"
 dependencies = [
  "libc 0.2.86",
  "librocksdb_sys",
@@ -4519,16 +4517,6 @@ name = "smallvec"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe0f37c9e8f3c5a4a66ad655a93c74daac4ad00c441533bf5c6e7990bb42604e"
-
-[[package]]
-name = "snappy-sys"
-version = "0.1.0"
-source = "git+https://github.com/busyjay/rust-snappy.git?branch=static-link#8c12738bad811397600455d6982aff754ea2ac44"
-dependencies = [
- "cmake",
- "libc 0.2.86",
- "pkg-config",
-]
 
 [[package]]
 name = "socket2"
