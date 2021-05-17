@@ -5,4 +5,5 @@ fn main() {
         "cargo:rustc-env=TIKV_BUILD_TIME={}",
         time::now_utc().strftime("%Y-%m-%d %H:%M:%S").unwrap()
     );
+     println!("cargo:rustc-link-lib=static=c++");
 }
