@@ -50,8 +50,8 @@ use tikv_util::sys::SysQuota;
 use tikv_util::time::duration_to_sec;
 use tikv_util::yatp_pool;
 
-use crate::coprocessor_v2::Config as CoprocessorV2Config;
 use crate::import::Config as ImportConfig;
+use crate::raw_coprocessor::Config as RawCoprocessorConfig;
 use crate::server::gc_worker::GcConfig;
 use crate::server::gc_worker::WriteCompactionFilterFactory;
 use crate::server::lock_manager::Config as PessimisticTxnConfig;
@@ -2303,7 +2303,7 @@ pub struct TiKvConfig {
     pub coprocessor: CopConfig,
 
     #[config(skip)]
-    pub coprocessor_v2: CoprocessorV2Config,
+    pub raw_coprocessor: RawCoprocessorConfig,
 
     #[config(submodule)]
     pub rocksdb: DbConfig,
@@ -2357,7 +2357,7 @@ impl Default for TiKvConfig {
             metric: MetricConfig::default(),
             raft_store: RaftstoreConfig::default(),
             coprocessor: CopConfig::default(),
-            coprocessor_v2: CoprocessorV2Config::default(),
+            raw_coprocessor: RawCoprocessorConfig::default(),
             pd: PdConfig::default(),
             rocksdb: DbConfig::default(),
             raftdb: RaftDbConfig::default(),
@@ -3949,7 +3949,7 @@ mod tests {
         // Other special cases.
         cfg.pd.retry_max_count = default_cfg.pd.retry_max_count; // Both -1 and isize::MAX are the same.
         cfg.storage.block_cache.capacity = OptionReadableSize(None); // Either `None` and a value is computed or `Some(_)` fixed value.
-        cfg.coprocessor_v2.coprocessor_plugin_directory = None; // Default is `None`, which is represented by not setting the key.
+        cfg.raw_coprocessor.coprocessor_plugin_directory = None; // Default is `None`, which is represented by not setting the key.
 
         assert_eq!(cfg, default_cfg);
     }

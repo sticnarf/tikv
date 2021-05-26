@@ -5,7 +5,7 @@ use tikv_util::time::{duration_to_sec, Instant};
 
 use super::batch::{BatcherBuilder, ReqBatcher};
 use crate::coprocessor::Endpoint;
-use crate::coprocessor_v2;
+use crate::raw_coprocessor;
 use crate::server::gc_worker::GcWorker;
 use crate::server::load_statistics::ThreadLoad;
 use crate::server::metrics::*;
@@ -60,7 +60,7 @@ pub struct Service<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: Lock
     // For handling coprocessor requests.
     copr: Endpoint<E>,
     // For handling corprocessor v2 requests.
-    copr_v2: coprocessor_v2::Endpoint,
+    raw_cop: raw_coprocessor::Endpoint,
     // For handling raft messages.
     ch: T,
     // For handling snapshot.
@@ -81,8 +81,8 @@ impl<T: RaftStoreRouter<RocksEngine> + Clone + 'static, E: Engine + Clone, L: Lo
             store_id: self.store_id,
             gc_worker: self.gc_worker.clone(),
             storage: self.storage.clone(),
-            copr: self.copr.clone(),
-            copr_v2: self.copr_v2.clone(),
+            copr: self.cop.clone(),
+            raw_cop: self.raw_cop.clone(),
             ch: self.ch.clone(),
             snap_scheduler: self.snap_scheduler.clone(),
             enable_req_batch: self.enable_req_batch,
@@ -99,7 +99,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Servi
         storage: Storage<E, L>,
         gc_worker: GcWorker<E, T>,
         copr: Endpoint<E>,
-        copr_v2: coprocessor_v2::Endpoint,
+        raw_cop: raw_coprocessor::Endpoint,
         ch: T,
         snap_scheduler: Scheduler<SnapTask>,
         grpc_thread_load: Arc<ThreadLoad>,
@@ -111,7 +111,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Servi
             gc_worker,
             storage,
             copr,
-            copr_v2,
+            raw_cop,
             ch,
             snap_scheduler,
             enable_req_batch,
@@ -331,7 +331,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         sink: UnarySink<RawCoprocessorResponse>,
     ) {
         let begin_instant = Instant::now_coarse();
-        let future = future_raw_coprocessor(&self.copr_v2, &self.storage, req);
+        let future = future_raw_cop(&self.raw_cop, &self.storage, req);
         let task = async move {
             let resp = future.await?;
             sink.success(resp).await?;
@@ -342,7 +342,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         }
         .map_err(|e| {
             debug!("kv rpc failed";
-                "request" => "coprocessor_v2",
+                "request" => "raw_coprocessor",
                 "err" => ?e
             );
             GRPC_MSG_FAIL_COUNTER.raw_coprocessor.inc();
@@ -897,8 +897,8 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         let ctx = Arc::new(ctx);
         let peer = ctx.peer();
         let storage = self.storage.clone();
-        let copr = self.copr.clone();
-        let copr_v2 = self.copr_v2.clone();
+        let copr = self.cop.clone();
+        let raw_cop = self.raw_cop.clone();
         let pool_size = storage.get_normal_pool_size();
         let batch_builder = BatcherBuilder::new(self.enable_req_batch, pool_size);
         let request_handler = stream.try_for_each(move |mut req| {
@@ -912,7 +912,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
                     &mut batcher,
                     &storage,
                     &copr,
-                    &copr_v2,
+                    &raw_cop,
                     &peer,
                     id,
                     req,
@@ -1101,7 +1101,7 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
     batcher: &mut Option<ReqBatcher>,
     storage: &Storage<E, L>,
     copr: &Endpoint<E>,
-    copr_v2: &coprocessor_v2::Endpoint,
+    raw_cop: &raw_coprocessor::Endpoint,
     peer: &str,
     id: u64,
     req: batch_commands_request::Request,
@@ -1186,8 +1186,8 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
         RawScan, future_raw_scan(storage), raw_scan;
         RawDeleteRange, future_raw_delete_range(storage), raw_delete_range;
         RawBatchScan, future_raw_batch_scan(storage), raw_batch_scan;
-        Coprocessor, future_copr(copr, Some(peer.to_string())), coprocessor;
-        RawCoprocessor, future_raw_coprocessor(copr_v2, storage), coprocessor;
+        Coprocessor, future_cop(copr, Some(peer.to_string())), coprocessor;
+        RawCoprocessor, future_raw_cop(raw_cop, storage), coprocessor;
         PessimisticLock, future_acquire_pessimistic_lock(storage), kv_pessimistic_lock;
         PessimisticRollback, future_pessimistic_rollback(storage), kv_pessimistic_rollback;
         Empty, future_handle_empty(), invalid;
@@ -1714,12 +1714,12 @@ fn future_copr<E: Engine>(
     async move { Ok(ret.await) }
 }
 
-fn future_raw_coprocessor<E: Engine, L: LockManager>(
-    copr_v2: &coprocessor_v2::Endpoint,
+fn future_raw_cop<E: Engine, L: LockManager>(
+    raw_cop: &raw_coprocessor::Endpoint,
     storage: &Storage<E, L>,
     req: RawCoprocessorRequest,
 ) -> impl Future<Output = ServerResult<RawCoprocessorResponse>> {
-    let ret = copr_v2.handle_request(storage, req);
+    let ret = raw_cop.handle_request(storage, req);
     async move { Ok(ret.await) }
 }
 
