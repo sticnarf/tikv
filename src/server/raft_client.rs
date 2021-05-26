@@ -11,8 +11,8 @@ use futures::compat::Future01CompatExt;
 use futures::task::{Context, Poll, Waker};
 use futures::{Future, Sink};
 use grpcio::{
-    ChannelBuilder, ClientCStreamReceiver, ClientCStreamSender, Environment,
-    RpcStatusCode, WriteFlags,
+    ChannelBuilder, ClientCStreamReceiver, ClientCStreamSender, Environment, RpcStatusCode,
+    WriteFlags,
 };
 use kvproto::raft_serverpb::{Done, RaftMessage};
 use kvproto::tikvpb::{BatchRaftMessage, TikvClient};
