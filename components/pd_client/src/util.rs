@@ -651,9 +651,9 @@ impl PdConnector {
                     return Ok((Some((client, ep.clone(), resp)), false));
                 }
                 Err(Error::Grpc(e)) => {
-                    if let RpcFailure(RpcStatus { status, details: _ }) = e {
-                        if status == RpcStatusCode::UNAVAILABLE
-                            || status == RpcStatusCode::DEADLINE_EXCEEDED
+                    if let RpcFailure(RpcStatus { code, .. }) = e {
+                        if code == RpcStatusCode::UNAVAILABLE
+                            || code == RpcStatusCode::DEADLINE_EXCEEDED
                         {
                             network_fail_num += 1;
                         }
