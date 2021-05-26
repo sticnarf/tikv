@@ -5,6 +5,7 @@ use std::sync::{mpsc, Arc};
 use std::time::Duration;
 use std::{thread, time};
 
+use super::*;
 use engine_rocks::RocksEngine;
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use grpcio::{
@@ -16,15 +17,12 @@ use kvproto::tikvpb::BatchRaftMessage;
 use raft::eraftpb::Entry;
 use raftstore::errors::DiscardReason;
 use raftstore::router::{RaftStoreBlackHole, RaftStoreRouter};
-use security::{SecurityConfig, SecurityManager};
 use tikv::server::resolve::Callback;
 use tikv::server::{
     self, resolve, Config, ConnectionBuilder, RaftClient, StoreAddrResolver, TestRaftStoreRouter,
 };
 use tikv_util::worker::Builder as WorkerBuilder;
 use tikv_util::worker::LazyWorker;
-
-use super::{mock_kv_service, MockKv, MockKvService};
 
 #[derive(Clone)]
 pub struct StaticResolver {
@@ -85,7 +83,58 @@ impl MockKvForRaft {
     }
 }
 
-impl MockKvService for MockKvForRaft {
+macro_rules! unary_call_unimplemented {
+    ($name:tt, $req_name:tt, $resp_name:tt) => {
+        fn $name(&mut self, ctx: RpcContext<'_>, _req: $req_name, sink: UnarySink<$resp_name>) {
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
+            ctx.spawn(sink.fail(status).map(|_| ()));
+        }
+    };
+}
+
+macro_rules! sstream_call_unimplemented {
+    ($name:tt, $req_name:tt, $resp_name:tt) => {
+        fn $name(
+            &mut self,
+            ctx: RpcContext<'_>,
+            _req: $req_name,
+            sink: ServerStreamingSink<$resp_name>,
+        ) {
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
+            ctx.spawn(sink.fail(status).map(|_| ()));
+        }
+    };
+}
+
+macro_rules! cstream_call_unimplemented {
+    ($name:tt, $req_name:tt, $resp_name:tt) => {
+        fn $name(
+            &mut self,
+            ctx: RpcContext<'_>,
+            _req: RequestStream<$req_name>,
+            sink: ClientStreamingSink<$resp_name>,
+        ) {
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
+            ctx.spawn(sink.fail(status).map(|_| ()));
+        }
+    };
+}
+
+macro_rules! bstream_call_unimplemented {
+    ($name:tt, $req_name:tt, $resp_name:tt) => {
+        fn $name(
+            &mut self,
+            ctx: RpcContext<'_>,
+            _req: RequestStream<$req_name>,
+            sink: DuplexSink<$resp_name>,
+        ) {
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
+            ctx.spawn(sink.fail(status).map(|_| ()));
+        }
+    };
+}
+
+impl Tikv for MockKvForRaft {
     fn raft(
         &mut self,
         ctx: RpcContext<'_>,
@@ -129,6 +178,120 @@ impl MockKvService for MockKvForRaft {
             drop(sink);
         });
     }
+
+    unary_call_unimplemented!(kv_get, GetRequest, GetResponse);
+    unary_call_unimplemented!(kv_scan, ScanRequest, ScanResponse);
+    unary_call_unimplemented!(kv_prewrite, PrewriteRequest, PrewriteResponse);
+    unary_call_unimplemented!(
+        kv_pessimistic_lock,
+        PessimisticLockRequest,
+        PessimisticLockResponse
+    );
+    unary_call_unimplemented!(
+        kv_pessimistic_rollback,
+        PessimisticRollbackRequest,
+        PessimisticRollbackResponse
+    );
+    unary_call_unimplemented!(kv_commit, CommitRequest, CommitResponse);
+    unary_call_unimplemented!(kv_import, ImportRequest, ImportResponse);
+    unary_call_unimplemented!(kv_cleanup, CleanupRequest, CleanupResponse);
+    unary_call_unimplemented!(kv_batch_get, BatchGetRequest, BatchGetResponse);
+    unary_call_unimplemented!(
+        kv_batch_rollback,
+        BatchRollbackRequest,
+        BatchRollbackResponse
+    );
+    unary_call_unimplemented!(kv_txn_heart_beat, TxnHeartBeatRequest, TxnHeartBeatResponse);
+    unary_call_unimplemented!(
+        kv_check_txn_status,
+        CheckTxnStatusRequest,
+        CheckTxnStatusResponse
+    );
+    unary_call_unimplemented!(
+        kv_check_secondary_locks,
+        CheckSecondaryLocksRequest,
+        CheckSecondaryLocksResponse
+    );
+    unary_call_unimplemented!(kv_scan_lock, ScanLockRequest, ScanLockResponse);
+    unary_call_unimplemented!(kv_resolve_lock, ResolveLockRequest, ResolveLockResponse);
+    unary_call_unimplemented!(kv_gc, GcRequest, GcResponse);
+    unary_call_unimplemented!(kv_delete_range, DeleteRangeRequest, DeleteRangeResponse);
+    unary_call_unimplemented!(raw_get, RawGetRequest, RawGetResponse);
+    unary_call_unimplemented!(raw_batch_get, RawBatchGetRequest, RawBatchGetResponse);
+    unary_call_unimplemented!(raw_scan, RawScanRequest, RawScanResponse);
+    unary_call_unimplemented!(raw_batch_scan, RawBatchScanRequest, RawBatchScanResponse);
+    unary_call_unimplemented!(raw_put, RawPutRequest, RawPutResponse);
+    unary_call_unimplemented!(raw_batch_put, RawBatchPutRequest, RawBatchPutResponse);
+    unary_call_unimplemented!(raw_delete, RawDeleteRequest, RawDeleteResponse);
+    unary_call_unimplemented!(
+        raw_batch_delete,
+        RawBatchDeleteRequest,
+        RawBatchDeleteResponse
+    );
+    unary_call_unimplemented!(
+        raw_delete_range,
+        RawDeleteRangeRequest,
+        RawDeleteRangeResponse
+    );
+    unary_call_unimplemented!(raw_get_key_ttl, RawGetKeyTtlRequest, RawGetKeyTtlResponse);
+    unary_call_unimplemented!(raw_compare_and_swap, RawCasRequest, RawCasResponse);
+    unary_call_unimplemented!(
+        unsafe_destroy_range,
+        UnsafeDestroyRangeRequest,
+        UnsafeDestroyRangeResponse
+    );
+    unary_call_unimplemented!(
+        register_lock_observer,
+        RegisterLockObserverRequest,
+        RegisterLockObserverResponse
+    );
+    unary_call_unimplemented!(
+        check_lock_observer,
+        CheckLockObserverRequest,
+        CheckLockObserverResponse
+    );
+    unary_call_unimplemented!(
+        remove_lock_observer,
+        RemoveLockObserverRequest,
+        RemoveLockObserverResponse
+    );
+    unary_call_unimplemented!(
+        physical_scan_lock,
+        PhysicalScanLockRequest,
+        PhysicalScanLockResponse
+    );
+    unary_call_unimplemented!(dispatch_mpp_task, DispatchTaskRequest, DispatchTaskResponse);
+    unary_call_unimplemented!(cancel_mpp_task, CancelTaskRequest, CancelTaskResponse);
+    unary_call_unimplemented!(coprocessor, Request, Response);
+    sstream_call_unimplemented!(batch_coprocessor, BatchRequest, BatchResponse);
+    sstream_call_unimplemented!(coprocessor_stream, Request, Response);
+    unary_call_unimplemented!(
+        raw_coprocessor,
+        RawCoprocessorRequest,
+        RawCoprocessorResponse
+    );
+    sstream_call_unimplemented!(
+        establish_mpp_connection,
+        EstablishMppConnectionRequest,
+        MppDataPacket
+    );
+    cstream_call_unimplemented!(snapshot, SnapshotChunk, Done);
+    unary_call_unimplemented!(
+        mvcc_get_by_start_ts,
+        MvccGetByStartTsRequest,
+        MvccGetByStartTsResponse
+    );
+    unary_call_unimplemented!(split_region, SplitRegionRequest, SplitRegionResponse);
+    unary_call_unimplemented!(read_index, ReadIndexRequest, ReadIndexResponse);
+    bstream_call_unimplemented!(batch_commands, BatchCommandsRequest, BatchCommandsResponse);
+    unary_call_unimplemented!(check_leader, CheckLeaderRequest, CheckLeaderResponse);
+    unary_call_unimplemented!(get_store_safe_ts, StoreSafeTsRequest, StoreSafeTsResponse);
+    unary_call_unimplemented!(
+        get_lock_wait_info,
+        GetLockWaitInfoRequest,
+        GetLockWaitInfoResponse
+    );
+    unary_call_unimplemented!(mvcc_get_by_key, MvccGetByKeyRequest, MvccGetByKeyResponse);
 }
 
 #[test]
@@ -223,11 +386,11 @@ fn test_batch_size_limit() {
 // port chosen between [`min_port`, `max_port`]. Return `None` if no port is available.
 fn create_mock_server<T>(service: T, min_port: u16, max_port: u16) -> Option<(Server, u16)>
 where
-    T: MockKvService + Clone + Send + 'static,
+    T: Tikv + Clone + Send + 'static,
 {
     for port in min_port..max_port {
-        let kv = MockKv(service.clone());
-        let mut mock_server = match mock_kv_service(kv, "localhost", port) {
+        let kv = service.clone();
+        let mut mock_server = match tikv_service(kv, "localhost", port) {
             Ok(s) => s,
             Err(_) => continue,
         };
@@ -241,9 +404,9 @@ where
 // Return `None` is the port is unavailable.
 fn create_mock_server_on<T>(service: T, port: u16) -> Option<Server>
 where
-    T: MockKvService + Clone + Send + 'static,
+    T: Tikv + Clone + Send + 'static,
 {
-    let mut mock_server = match mock_kv_service(MockKv(service), "localhost", port) {
+    let mut mock_server = match tikv_service(service, "localhost", port) {
         Ok(s) => s,
         Err(_) => return None,
     };
