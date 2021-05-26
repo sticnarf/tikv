@@ -1,7 +1,7 @@
 // Copyright 2021 TiKV Project Authors. Licensed under Apache-2.0.
 
 use coprocessor_plugin_api::*;
-use kvproto::kvrpcpb;
+use kvproto::kvrpcpb as coprv2pb;
 use semver::VersionReq;
 use std::future::Future;
 use std::ops::Not;
