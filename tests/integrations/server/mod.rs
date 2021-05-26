@@ -11,11 +11,7 @@ use std::sync::Arc;
 
 use ::security::{SecurityConfig, SecurityManager};
 use grpcio::*;
-use kvproto::coprocessor::*;
-use kvproto::kvrpcpb::*;
-use kvproto::mpp::*;
-use kvproto::raft_serverpb::SnapshotChunk;
-use kvproto::tikvpb::{create_tikv, BatchCommandsRequest, BatchCommandsResponse, Tikv};
+use kvproto::tikvpb::{create_tikv, Tikv};
 fn tikv_service<T>(kv: T, ip: &str, port: u16) -> Result<Server>
 where
     T: Tikv + Clone + Send + 'static,
