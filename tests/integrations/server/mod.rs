@@ -24,7 +24,7 @@ use kvproto::tikvpb::{
 macro_rules! unary_call {
     ($name:tt, $req_name:tt, $resp_name:tt) => {
         fn $name(&mut self, ctx: RpcContext<'_>, _: $req_name, sink: UnarySink<$resp_name>) {
-            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED, None);
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
             ctx.spawn(sink.fail(status).map(|_| ()));
         }
     };
@@ -38,7 +38,7 @@ macro_rules! sstream_call {
             _: $req_name,
             sink: ServerStreamingSink<$resp_name>,
         ) {
-            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED, None);
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
             ctx.spawn(sink.fail(status).map(|_| ()));
         }
     };
@@ -52,7 +52,7 @@ macro_rules! cstream_call {
             _: RequestStream<$req_name>,
             sink: ClientStreamingSink<$resp_name>,
         ) {
-            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED, None);
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
             ctx.spawn(sink.fail(status).map(|_| ()));
         }
     };
@@ -66,7 +66,7 @@ macro_rules! bstream_call {
             _: RequestStream<$req_name>,
             sink: DuplexSink<$resp_name>,
         ) {
-            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED, None);
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
             ctx.spawn(sink.fail(status).map(|_| ()));
         }
     };

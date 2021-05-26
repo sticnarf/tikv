@@ -111,7 +111,7 @@ impl MockKvService for MockKvForRaft {
         sink: ClientStreamingSink<Done>,
     ) {
         if !self.allow_batch {
-            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED, None);
+            let status = RpcStatus::new(RpcStatusCode::UNIMPLEMENTED);
             ctx.spawn(sink.fail(status).map(|_| ()));
             return;
         }
