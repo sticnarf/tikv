@@ -81,7 +81,7 @@ impl<T: RaftStoreRouter<RocksEngine> + Clone + 'static, E: Engine + Clone, L: Lo
             store_id: self.store_id,
             gc_worker: self.gc_worker.clone(),
             storage: self.storage.clone(),
-            copr: self.cop.clone(),
+            copr: self.copr.clone(),
             raw_cop: self.raw_cop.clone(),
             ch: self.ch.clone(),
             snap_scheduler: self.snap_scheduler.clone(),
@@ -897,7 +897,7 @@ impl<T: RaftStoreRouter<RocksEngine> + 'static, E: Engine, L: LockManager> Tikv
         let ctx = Arc::new(ctx);
         let peer = ctx.peer();
         let storage = self.storage.clone();
-        let copr = self.cop.clone();
+        let copr = self.copr.clone();
         let raw_cop = self.raw_cop.clone();
         let pool_size = storage.get_normal_pool_size();
         let batch_builder = BatcherBuilder::new(self.enable_req_batch, pool_size);
@@ -1186,7 +1186,7 @@ fn handle_batch_commands_request<E: Engine, L: LockManager>(
         RawScan, future_raw_scan(storage), raw_scan;
         RawDeleteRange, future_raw_delete_range(storage), raw_delete_range;
         RawBatchScan, future_raw_batch_scan(storage), raw_batch_scan;
-        Coprocessor, future_cop(copr, Some(peer.to_string())), coprocessor;
+        Coprocessor, future_copr(copr, Some(peer.to_string())), coprocessor;
         RawCoprocessor, future_raw_cop(raw_cop, storage), coprocessor;
         PessimisticLock, future_acquire_pessimistic_lock(storage), kv_pessimistic_lock;
         PessimisticRollback, future_pessimistic_rollback(storage), kv_pessimistic_rollback;

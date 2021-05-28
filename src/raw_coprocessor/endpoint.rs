@@ -71,7 +71,7 @@ impl Endpoint {
     fn handle_request_impl<E: Engine, L: LockManager>(
         &self,
         storage: &Storage<E, L>,
-        mt req: raw_coppb::RawCoprocessorRequest,
+        mut req: raw_coppb::RawCoprocessorRequest,
     ) -> Result<RawResponse, CoprocessorError> {
         let plugin = self
             .plugin_registry
