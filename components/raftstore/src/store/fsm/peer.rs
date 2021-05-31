@@ -2194,11 +2194,13 @@ where
         // It's not correct anymore, so set it to false to schedule a split check task.
         self.fsm.peer.has_calculated_region_size = false;
 
+        let mut heartbeat_fns = Vec::with_capacity(regions.len() + 1);
+
         let is_leader = self.fsm.peer.is_leader();
         if is_leader {
             self.fsm.peer.approximate_size = estimated_size;
             self.fsm.peer.approximate_keys = estimated_keys;
-            self.fsm.peer.heartbeat_pd(self.ctx);
+            heartbeat_fns.push(self.fsm.peer.heartbeat_pd_fn(self.ctx));
             // Notify pd immediately to let it update the region meta.
             info!(
                 "notify pd with split";
@@ -2322,7 +2324,7 @@ where
                 new_peer.peer.approximate_keys = estimated_keys;
                 // The new peer is likely to become leader, send a heartbeat immediately to reduce
                 // client query miss.
-                new_peer.peer.heartbeat_pd(self.ctx);
+                heartbeat_fns.push(new_peer.peer.heartbeat_pd_fn(self.ctx));
             }
 
             new_peer.peer.activate(self.ctx);
@@ -2366,6 +2368,10 @@ where
         drop(meta);
         if is_leader {
             self.on_split_region_check_tick();
+        }
+
+        for heartbeat_fn in heartbeat_fns {
+            heartbeat_fn(self.ctx);
         }
         fail_point!("after_split", self.ctx.store_id() == 3, |_| {});
     }
