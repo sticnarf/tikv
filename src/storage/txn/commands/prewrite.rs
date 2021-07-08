@@ -445,8 +445,9 @@ impl<K: PrewriteKind> Prewriter<K> {
             reader: &mut SnapshotReader<impl Snapshot>,
             key: &Key,
         ) -> Result<(Vec<std::result::Result<(), StorageError>>, TimeStamp)> {
+            let init_seek_ts = reader.current_commit_ts().unwrap_or(TimeStamp::max());
             if let TxnCommitRecord::SingleRecord { commit_ts, .. } =
-                reader.get_txn_commit_record(key)?
+                reader.search_txn_commit_record(key, init_seek_ts)?
             {
                 info!("prewrited transaction has been committed";
                     "start_ts" => reader.start_ts, "commit_ts" => commit_ts);

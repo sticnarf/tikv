@@ -37,6 +37,16 @@ impl<S: EngineSnapshot> SnapshotReader<S> {
     }
 
     #[inline(always)]
+    pub fn search_txn_commit_record(
+        &mut self,
+        key: &Key,
+        init_seek_ts: TimeStamp,
+    ) -> Result<TxnCommitRecord> {
+        self.reader
+            .search_txn_commit_record(key, self.start_ts, init_seek_ts)
+    }
+
+    #[inline(always)]
     pub fn load_lock(&mut self, key: &Key) -> Result<Option<Lock>> {
         self.reader.load_lock(key)
     }
@@ -84,6 +94,16 @@ impl<S: EngineSnapshot> SnapshotReader<S> {
     #[inline(always)]
     pub fn take_statistics(&mut self) -> Statistics {
         std::mem::take(&mut self.reader.statistics)
+    }
+
+    /// Extract the commit_ts of the record which the write CF cursor points to.
+    pub fn current_commit_ts(&mut self) -> Option<TimeStamp> {
+        let statistics = &mut self.reader.statistics.write;
+        self.reader
+            .write_cursor
+            .as_ref()
+            .map(|cursor| cursor.key(statistics))
+            .and_then(|write_key| Key::decode_ts_from(write_key).ok())
     }
 }
 
@@ -277,7 +297,21 @@ impl<S: EngineSnapshot> MvccReader<S> {
         // I.e., txn_1.commit_ts > txn_2.commit_ts > txn_2.start_ts > txn_1.start_ts.
         //
         // Scan all the versions from `TimeStamp::max()` to `start_ts`.
-        let mut seek_ts = TimeStamp::max();
+        self.search_txn_commit_record(key, start_ts, TimeStamp::max())
+    }
+
+    /// Scan from `init_seek_ts` to find the transaction with the given `start_ts`.
+    ///
+    /// Note: This function should be only used when the `commit_ts` of the transaction is
+    /// known to be smaller than or equal to `init_seek_ts`. Otherwise, you should just
+    /// use `get_txn_commit_record`.
+    pub fn search_txn_commit_record(
+        &mut self,
+        key: &Key,
+        start_ts: TimeStamp,
+        init_seek_ts: TimeStamp,
+    ) -> Result<TxnCommitRecord> {
+        let mut seek_ts = init_seek_ts;
         let mut gc_fence = TimeStamp::from(0);
         while let Some((commit_ts, write)) = self.seek_write(key, seek_ts)? {
             if write.start_ts == start_ts {
